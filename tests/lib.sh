@@ -1,7 +1,41 @@
 # Common helpers for Cvent API test scripts.
 # Source this from test scripts: source "$(dirname "$0")/lib.sh"
 
-set -euo pipefail
+# --- strict-mode sandbox ----------------------------------------------------
+# Test scripts want -euo pipefail, but leaving it on when control returns to
+# an interactive shell breaks prompt hooks that reference unset variables
+# (powerline's binding uses bare $POWERLINE_COMMAND_ARGS -> "unbound variable").
+# So: strict mode only for real script execution; interactive sourcing leaves
+# the shell's options (and its prompt) untouched, and die/check return instead
+# of exiting the user's shell.
+_LIB_INTERACTIVE=0
+if [[ "${BASH_SOURCE[0]}" != "$0" && -n "${PS1:-}" ]]; then
+  _LIB_INTERACTIVE=1
+else
+  _lib_was_errexit=0
+  _lib_was_nounset=0
+  _lib_was_pipefail=0
+  _lib_opts_before=$(set +o | grep -E '^(errexit|nounset|pipefail) ' || true)
+  while read -r _lib_name _lib_state; do
+    case "$_lib_name" in
+      errexit)  if [ "$_lib_state" = on ]; then _lib_was_errexit=1; fi ;;
+      nounset)  if [ "$_lib_state" = on ]; then _lib_was_nounset=1; fi ;;
+      pipefail) if [ "$_lib_state" = on ]; then _lib_was_pipefail=1; fi ;;
+    esac
+  done <<<"$_lib_opts_before"
+
+  set -euo pipefail
+
+  _lib_restore_opts() {
+    set +e +u
+    set +o pipefail
+    if [ "$_lib_was_errexit" = 1 ]; then set -e; fi
+    if [ "$_lib_was_nounset" = 1 ]; then set -u; fi
+    if [ "$_lib_was_pipefail" = 1 ]; then set -o pipefail; fi
+    return 0
+  }
+  trap _lib_restore_opts EXIT
+fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$REPO_ROOT/.env"
@@ -12,7 +46,14 @@ log()  { printf '\033[1;34m[tests]\033[0m %s\n' "$*"; }
 pass() { printf '\033[1;32mPASS\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31mFAIL\033[0m %s\n' "$*"; }
 
-die() { fail "$*"; exit 1; }
+# exit 1 for script runs; return 1 when sourced interactively (never kill the
+# user's shell).
+_lib_stop() {
+  if [ "$_LIB_INTERACTIVE" = 1 ]; then return 1; fi
+  exit 1
+}
+
+die() { fail "$*"; _lib_stop; }
 
 require_env() {
   [ -f "$ENV_FILE" ] || die ".env not found at $ENV_FILE (expected CVENT_CLIENT_ID / CVENT_CLIENT_SECRET)"
@@ -63,5 +104,5 @@ cvent_get() {
 
 # Check a condition: check <condition-exit-code> <label>
 check() {
-  if [ "$1" -eq 0 ]; then pass "$2"; else fail "$2"; exit 1; fi
+  if [ "$1" -eq 0 ]; then pass "$2"; else fail "$2"; _lib_stop; fi
 }
