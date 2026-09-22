@@ -23,18 +23,10 @@ const OFFLINE_CHANNEL = "cvent-data";
 const API_TTL_MS = 5 * 60 * 1000;
 
 const PRECACHE = [
-  "/",
-  "/index.html",
-  "/styles.css",
-  "/theme.js",
-  "/app.js",
-  "/sources/registry.js",
-  "/sources/cvent.js",
-  "/manifest.webmanifest",
-  "/icons/icon-192.png",
-  "/icons/icon-512.png",
-  "/icons/icon-192-maskable.png",
-  "/icons/icon-512-maskable.png",
+  "/", "/index.html", "/styles.css", "/theme.js", "/app.js",
+  "/sources/registry.js", "/sources/cvent.js", "/manifest.webmanifest",
+  "/icons/icon-192.png", "/icons/icon-512.png",
+  "/icons/icon-192-maskable.png", "/icons/icon-512-maskable.png",
 ];
 
 /* ---------- install: precache the static shell, then skipWaiting ---------- */
@@ -43,16 +35,20 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(STATIC_CACHE);
-      await Promise.all(
-        PRECACHE.map((p) =>
-          fetch(p)
-            .then((res) => {
-              // Opaque-safe: only cache OK responses for same-origin GETs.
-              if (res && res.ok) return cache.put(p, res);
+      try {
+        await Promise.all(
+          PRECACHE.map((p) =>
+            fetch(p).then((res) => {
+              if (res && res.ok) return cache.put(p, res); // OK responses only
             })
-            .catch(() => {})
-        )
-      );
+          )
+        );
+      } catch (err) {
+        // Failed precache: drop the partial cache, rethrow so install fails
+        // and the browser keeps the previously-active worker.
+        await caches.delete(STATIC_CACHE).catch(() => {});
+        throw err;
+      }
       await self.skipWaiting();
     })()
   );
@@ -83,8 +79,7 @@ self.addEventListener("fetch", (event) => {
 
   const path = url.pathname;
 
-  // (a) Attendee search: ALWAYS network — stale results are worse than
-  // none; on failure the view renders its own error card.
+  // (a) Attendee search: ALWAYS network — stale results are worse than none.
   if (path.startsWith("/api/cvent/event/attendees")) {
     event.respondWith(fetch(req));
     return;
@@ -105,8 +100,8 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // (d) Dump snapshots: cache-first, never expire (immutable once dumped;
-  // the server's no-cache header is intentionally ignored for offline use).
+  // (d) Dump snapshots: cache-first, never expire (immutable; the server's
+  // no-cache header is intentionally ignored for offline use).
   if (path.startsWith("/data/")) {
     event.respondWith(cacheFirst(req));
     return;
@@ -150,18 +145,11 @@ async function staleWhileRevalidate(req) {
 }
 
 async function eventApi(req) {
+  let res;
   try {
-    const res = await fetch(req);
-    if (res && res.ok) {
-      const body = await res.clone().text();
-      const meta = JSON.stringify({ url: req.url, ts: Date.now() });
-      await Promise.all([
-        caches.open(API_CACHE).then((c) => c.put(req.url, new Response(body, { status: 200 }))),
-        caches.open(META_CACHE).then((c) => c.put(req.url, new Response(meta, { status: 200 }))),
-      ]);
-    }
-    return res;
+    res = await fetch(req);
   } catch (err) {
+    // Network failure: serve cached copy; signal offline if >= TTL old.
     const cache = await caches.open(API_CACHE);
     const hit = await cache.match(req.url);
     if (!hit) return Response.error(); // never cached — let the view fail
@@ -170,12 +158,26 @@ async function eventApi(req) {
     }
     return hit;
   }
+  if (res && res.ok) {
+    // Best-effort writes: a failure (e.g. quota) must never replace the
+    // fresh response with a stale cached copy.
+    try {
+      const body = await res.clone().text();
+      const meta = JSON.stringify({ url: req.url, ts: Date.now() });
+      await Promise.all([
+        caches.open(API_CACHE).then((c) => c.put(req.url, new Response(body, { status: 200 }))),
+        caches.open(META_CACHE).then((c) => c.put(req.url, new Response(meta, { status: 200 }))),
+      ]);
+    } catch (err) {
+      /* write failed — return the fresh response anyway */
+    }
+  }
+  return res;
 }
 
 /* Fetch the {url, ts} sidecar entry; null when absent or malformed. */
 async function metaTs(url) {
-  const cache = await caches.open(META_CACHE);
-  const entry = await cache.match(url);
+  const entry = await (await caches.open(META_CACHE)).match(url);
   if (!entry) return null;
   try {
     const data = await entry.json();
@@ -185,8 +187,7 @@ async function metaTs(url) {
   }
 }
 
-/* Tell the page we served a stale copy: it listens on the same-named
- * BroadcastChannel and forwards to its offline-banner window event. */
+/* Page listens on the same-named BroadcastChannel for offline signals. */
 function signalOffline(url) {
   try {
     const channel = new BroadcastChannel(OFFLINE_CHANNEL);
