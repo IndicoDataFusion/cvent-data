@@ -20,7 +20,7 @@ const defaultEventID = "TESTCODE01"
 
 type server struct {
 	webDir  string // directory containing web assets
-	dataDir string // directory for fetched data caches (unused until later tasks)
+	dataDir string // directory with the --dump snapshots, served under /data/
 	eventID string // the one and only event this app serves
 	// cvent is the single-event API handler group (Task 6). Nil when Cvent
 	// credentials could not be loaded: /api/cvent/… then answers 503 while
@@ -149,6 +149,33 @@ func (s *server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	s.serveIndex(w)
 }
 
+// handleData serves files from the data dir (the --dump snapshots) under
+// /data/. Unlike handleStatic there is NO SPA fallback: a missing file or a
+// directory is a real 404 JSON so the frontend's fetch error handling works.
+// .json files get no-cache so a re-dump is picked up on reload.
+func (s *server) handleData(w http.ResponseWriter, r *http.Request) {
+	p := strings.TrimPrefix(r.URL.Path, "/data/")
+	if p == "" {
+		// Dir root: no directory listing.
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	// Resolve within the data dir (no traversal) — same technique as
+	// handleStatic.
+	full := filepath.Join(s.dataDir, filepath.Clean("/"+p))
+	if !strings.HasPrefix(full, filepath.Clean(s.dataDir)+string(filepath.Separator)) && full != filepath.Clean(s.dataDir) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if fi, err := os.Stat(full); err != nil || fi.IsDir() {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	w.Header().Set("Content-Type", contentType(p))
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeFile(w, r, full)
+}
+
 // statusWriter captures the response status for request logging.
 type statusWriter struct {
 	http.ResponseWriter
@@ -261,6 +288,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", http.HandlerFunc(s.handleAPI))
+	mux.Handle("/data/", http.HandlerFunc(s.handleData))
 	mux.Handle("/", http.HandlerFunc(s.handleStatic))
 
 	srv := &http.Server{
