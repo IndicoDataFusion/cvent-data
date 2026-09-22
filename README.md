@@ -51,9 +51,9 @@ optional (default `https://api-platform.cvent.com/ea`; the EU base is
 
 With **missing credentials** the server still starts: static serving and
 `/api/health` keep working, but `/api/cvent/…` answers
-`404 {"error":"unknown source"}` (the `cvent` handler group is only
-registered when creds load, so the source lookup fails first — there is no
-live data to serve).
+`503 {"error":"cvent credentials not configured"}` (the `cvent` source is
+always registered; without a client its handler group reports missing
+credentials).
 
 ### Phone install
 
@@ -91,7 +91,8 @@ the intended path for HTTPS-deployed or file-only setups.
 | `GET /api/cvent/event/repull-status` | `{running, pulledAt}` |
 
 Errors are JSON. **502** = upstream Cvent failure (event resolution or a
-resource fetch); **404** = unknown source / no cvent creds (see above).
+resource fetch); **503** = no cvent creds (see above); **404** = unknown
+source.
 
 ### Tests
 
