@@ -397,7 +397,7 @@ function headerCard(bundle) {
 }
 
 // Registrations card: big dynamic attendee count + one table row per
-// registration type (code, name, capacity, Open/Full).
+// registration type (name, code, capacity, Open/Full).
 function registrationsCard(bundle) {
   const counts = bundle.counts || {};
   const total = Number.isFinite(counts.attendees) ? counts.attendees : 0;
@@ -415,7 +415,7 @@ function registrationsCard(bundle) {
       const unlimited = cap.total == null || cap.total < 0;
       const full = !unlimited && cap.total - (cap.consumed || 0) <= 0;
       return (
-        "<tr><td>" + esc(t.code) + "</td><td>" + esc(t.name) + "</td>" +
+        "<tr><td>" + esc(t.name) + "</td><td>" + esc(t.code) + "</td>" +
         '<td class="num">' + (unlimited ? "Unlimited" : esc(cap.total)) + "</td>" +
         "<td>" +
         (full
@@ -427,7 +427,7 @@ function registrationsCard(bundle) {
     .join("");
   return (
     card(sectionTitle("Registrations") + countHtml +
-    '<table class="tbl"><thead><tr><th>Code</th><th>Name</th>' +
+    '<table class="tbl"><thead><tr><th>Name</th><th>Code</th>' +
     '<th class="num">Capacity</th><th>Status</th></tr></thead><tbody>' +
     rows + "</tbody></table>")
   );
