@@ -294,13 +294,25 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-// Deterministic, locale-safe dates (fixed month names, UTC parts):
-// "May 23, 2027".
+// "May 23, 2027" (full month) — used where space allows.
 function fmtDate(iso) {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return "";
   const d = new Date(t);
   return MONTHS[d.getUTCMonth()] + " " + d.getUTCDate() + ", " + d.getUTCFullYear();
+}
+
+const MONTHS_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+// "Feb 27, 2027" — compact form for tight cells (early-bird deadlines).
+function fmtDateShort(iso) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "";
+  const d = new Date(t);
+  return MONTHS_SHORT[d.getUTCMonth()] + " " + d.getUTCDate() + ", " + d.getUTCFullYear();
 }
 
 // "May 23 – 28, 2027" (same month), "May 28 – June 1, 2027" (same year),
@@ -336,6 +348,21 @@ function money(amount, currency) {
   const digits = neg ? i.slice(1) : i;
   const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return (neg ? "-" : "") + grouped + "." + d + (currency ? " " + currency : "");
+}
+
+// money() that drops the cents when they are zero — for whole-dollar price
+// tables where "1,300" reads better and narrower than "1,300.00".
+function money0(amount, currency) {
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return money(0, currency);
+  const neg = n < 0;
+  const intPart = Math.floor(Math.abs(n));
+  const cents = Math.round((Math.abs(n) - intPart) * 100);
+  const grouped = String(intPart).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const body = cents === 0
+    ? grouped
+    : grouped + "." + String(cents).padStart(2, "0");
+  return (neg ? "-" : "") + body + (currency ? " " + currency : "");
 }
 
 function card(inner) {
@@ -405,50 +432,81 @@ function registrationsCard(bundle) {
   );
 }
 
-// Pricing card: fee items grouped by category. A category is the fee
-// item's product: "AdmissionItem" → the admission's code (joined on
-// product.id into admissionItems), any other product type (QuantityItem:
-// tours, extra tickets) → the product's name. Group header rows use
-// colspan; no grand-total row — the fees are different price points, not
-// line items of one order, so a "total" would be meaningless.
-function pricingCard(bundle, currency) {
+// Per registration type, its primary (type-specific) admission fee. A fee
+// item applies to one or more registration types (fee.registrationTypes is
+// a list of type ids); the type's own standard price is the AdmissionItem
+// linked to the FEWEST types — the generic "All Registrants" fee is shared
+// across nearly every type, so it is never any single type's price. Among
+// candidates we prefer a displayed fee, then break ties by higher amount.
+// Returns null for a type that has no admission fee.
+function primaryFeeForType(bundle) {
   const fees = Array.isArray(bundle.feeItems) ? bundle.feeItems : [];
-  if (!fees.length) {
+  const rts = Array.isArray(bundle.registrationTypes) ? bundle.registrationTypes : [];
+  const links = {}; // fee id -> number of registration types it applies to
+  const feesByRt = {}; // rt id -> [fee]
+  rts.forEach((r) => { feesByRt[r.id] = []; });
+  fees.forEach((f) => {
+    const ids = Array.isArray(f.registrationTypes) ? f.registrationTypes : [];
+    links[f.id] = ids.length;
+    ids.forEach((id) => { if (feesByRt[id]) feesByRt[id].push(f); });
+  });
+  return (rtId) => {
+    const fl = feesByRt[rtId] || [];
+    let adm = fl.filter((f) => (f.product || {}).type === "AdmissionItem" && f.display);
+    if (!adm.length) adm = fl.filter((f) => (f.product || {}).type === "AdmissionItem");
+    if (!adm.length) return null;
+    return adm.slice().sort((a, b) =>
+      (links[a.id] - links[b.id]) || ((Number(b.amount) || 0) - (Number(a.amount) || 0))
+    )[0];
+  };
+}
+
+// Pricing card: one row per registration type — its standard admission fee
+// and, when the fee carries an early-bird tier, the early-bird amount with
+// the register-by deadline. The blank placeholder type is skipped; a type
+// with no admission fee shows "—".
+function pricingCard(bundle, currency) {
+  const rts = Array.isArray(bundle.registrationTypes) ? bundle.registrationTypes : [];
+  if (!rts.length || !(Array.isArray(bundle.feeItems) && bundle.feeItems.length)) {
     return card(sectionTitle("Pricing") + '<div class="empty-state"><div class="hint">No pricing</div></div>');
   }
-  const adms = Array.isArray(bundle.admissionItems) ? bundle.admissionItems : [];
-  const admCode = {};
-  adms.forEach((a) => { if (a.id) admCode[a.id] = a.code || a.name || ""; });
-  const groups = [];
-  const groupIdx = {};
-  fees.forEach((f) => {
-    const p = f.product || {};
-    const cat =
-      p.type === "AdmissionItem" && admCode[p.id]
-        ? admCode[p.id]
-        : p.name || "Other";
-    if (!(cat in groupIdx)) {
-      groupIdx[cat] = groups.length;
-      groups.push({ cat, items: [] });
-    }
-    groups[groupIdx[cat]].items.push(f);
-  });
+  const primaryFee = primaryFeeForType(bundle);
+  // State the currency once (fees all share the event currency); cells then
+  // show bare numbers so three columns fit a phone.
+  const cur = (bundle.event && bundle.event.currency) || currency || "";
   let body = "";
-  groups.forEach((g) => {
-    body += '<tr class="group-row"><td colspan="2">' + esc(g.cat) + "</td></tr>";
-    g.items.forEach((f) => {
-      const earlyBird = Array.isArray(f.earlyBirdPricing) && f.earlyBirdPricing.length > 0;
-      body +=
-        "<tr><td>" + esc(f.name) +
-        (earlyBird ? ' <span class="badge badge-amber">Early bird</span>' : "") +
-        "</td>" +
-        '<td class="num">' + esc(money(f.amount, f.currency || currency)) + "</td></tr>";
-    });
+  rts.forEach((t) => {
+    const name = t.name || t.code;
+    if (!name) return; // skip the blank placeholder registration type
+    const fee = primaryFee(t.id);
+    const std = fee && Number.isFinite(Number(fee.amount))
+      ? esc(money0(fee.amount))
+      : '<span class="muted-line">—</span>';
+    const eb = fee && Array.isArray(fee.earlyBirdPricing) && fee.earlyBirdPricing.length
+      ? fee.earlyBirdPricing[0]
+      : null;
+    let ebCell;
+    if (eb && Number.isFinite(Number(eb.amount))) {
+      ebCell =
+        '<div class="eb-amount">' + esc(money0(eb.amount)) + "</div>" +
+        (eb.registerByDate
+          ? '<div class="muted-line">by ' + esc(fmtDateShort(eb.registerByDate)) + "</div>"
+          : "");
+    } else {
+      ebCell = '<span class="muted-line">—</span>';
+    }
+    body +=
+      "<tr><td>" + esc(name) + "</td>" +
+      '<td class="num">' + std + "</td>" +
+      '<td class="num">' + ebCell + "</td></tr>";
   });
+  if (!body) {
+    return card(sectionTitle("Pricing") + '<div class="empty-state"><div class="hint">No pricing</div></div>');
+  }
   return (
-    card(sectionTitle("Pricing") +
-    '<table class="tbl"><thead><tr><th>Name</th>' +
-    '<th class="num">Amount</th></tr></thead><tbody>' +
+    card(sectionTitle("Pricing", cur ? ' <span class="badge badge-slate">' + esc(cur) + "</span>" : "") +
+    '<table class="tbl"><thead><tr><th>Registration type</th>' +
+    '<th class="num">Standard</th><th class="num">Early bird</th></tr></thead><tbody>' +
     body +
     "</tbody></table>")
   );

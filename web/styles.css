@@ -326,6 +326,9 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
 .tbl tbody tr:active { background: color-mix(in srgb, var(--text) 5%, transparent); }
 /* numeric columns align right (tabular). */
 .tbl .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Early-bird cell: amount on top, "by <date>" deadline stacked beneath it. */
+.tbl .eb-amount { font-variant-numeric: tabular-nums; }
+.tbl .eb-amount + .muted-line { margin-top: 2px; line-height: 1.2; }
 /* Pricing category group header row — accent-rail sub-header (house-style cat-head). */
 .tbl .group-row { cursor: default; }
 .tbl .group-row td {
