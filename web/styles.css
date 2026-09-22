@@ -255,7 +255,11 @@ button { font: inherit; cursor: pointer; }
   padding: 8px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
+  overflow-wrap: anywhere;
 }
+/* Badges inside table cells: tighter padding so the status column stays
+   inside the card on narrow screens (the table is width:100% of the card). */
+.tbl .badge { padding: 4px 8px; }
 .tbl tbody tr:last-child td { border-bottom: none; }
 .tbl tbody tr { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .tbl tbody tr:active { background: color-mix(in srgb, var(--text) 5%, transparent); }
