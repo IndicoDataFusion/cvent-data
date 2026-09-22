@@ -440,9 +440,10 @@ button { font: inherit; cursor: pointer; }
 
 /* ================= touch targets (coarse pointers) ================= */
 @media (pointer: coarse) {
-  .chip, .topbar-btn, .btn, .tbl tbody tr { position: relative; }
+  .chip, .topbar-btn, .btn, .expander, .tbl tbody tr { position: relative; }
   .chip::after { content: ""; position: absolute; inset: -6px; }
   .topbar-btn::after { content: ""; position: absolute; inset: -4px; }
   .btn::after { content: ""; position: absolute; inset: -4px; }
+  .expander::after { content: ""; position: absolute; inset: -4px; }
   .tbl tbody tr::after { content: ""; position: absolute; inset: 0 -4px; }
 }

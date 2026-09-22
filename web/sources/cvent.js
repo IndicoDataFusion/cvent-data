@@ -514,7 +514,8 @@ function paymentsCard(payments, currency) {
     const rest = rows.slice(CAP);
     const more = rest.length
       ? '<tbody data-more hidden>' + rest.join("") + "</tbody>" +
-        '<button class="btn" data-expand type="button">Show all (' + esc(orders.length) + ")</button>"
+        '<button class="expander" data-expand type="button">Show all (' +
+        esc(orders.length) + ")</button>"
       : "";
     body =
       '<table class="tbl"><thead><tr><th>Attendee</th><th>Invoice</th>' +
@@ -554,7 +555,8 @@ function programCard(bundle) {
       visible + "</tbody>" +
       (rest.length
         ? '<tbody data-more hidden>' + rest.join("") + "</tbody>" +
-          '<button class="btn" data-expand type="button">Show all (' + esc(rows.length) + ")</button>"
+          '<button class="expander" data-expand type="button">Show all (' +
+          esc(rows.length) + ")</button>"
         : "") +
       "</table>";
   }
