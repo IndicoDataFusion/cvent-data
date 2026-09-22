@@ -409,6 +409,7 @@ function registrationsCard(bundle) {
     return card(sectionTitle("Registrations") + countHtml + '<div class="empty-state"><div class="hint">No registration types</div></div>');
   }
   const rows = types
+    .filter((t) => t.code || t.name) // skip Cvent's blank placeholder type
     .map((t) => {
       const cap = t.capacity || {};
       const unlimited = cap.total == null || cap.total < 0;
