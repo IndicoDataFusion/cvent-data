@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # run_all.sh — run every test_*.sh in this folder, summarize results
+# (test_server.sh is self-contained and offline; the others hit the live API)
 set -uo pipefail
 cd "$(dirname "$0")"
 shopt -s nullglob
