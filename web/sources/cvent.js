@@ -48,7 +48,6 @@ let staticBundle = null;     // static-mode getEvent() cache
 let staticPayments = null;   // static-mode getPayments() cache
 let pollTimer = null;        // repull-status poll
 let repullRunning = false;
-let repullObservers = new Set(); // (running) => void — home's Re-pull button
 
 // Drop client-side static caches. Live mode needs no client cache: the
 // server's 15-min cache (busted by the repull) is the single source of
@@ -201,24 +200,10 @@ export async function searchAttendees(q, limit, offset) {
 
 /* ---------- repull (live mode only) ---------- */
 
-// True while a background repull is in flight (so a Re-pull button can
-// dim itself — Task 10).
+// True while a background repull is in flight (so the topbar Refresh button
+// can disable itself — see app.js).
 export function isRepulling() {
   return repullRunning;
-}
-
-// Subscribe to repull-state ticks (every poll tick + start + completion).
-// The home view uses this to keep its Re-pull button dimmed/labelled while a
-// repull is in flight, updating on the 3s poll ticks. Returns an
-// unsubscribe fn. Live mode only — static mode never repulls.
-export function subscribeRepull(fn) {
-  repullObservers.add(fn);
-  fn(repullRunning);
-  return () => repullObservers.delete(fn);
-}
-
-function notifyRepull(running) {
-  repullObservers.forEach((fn) => fn(running));
 }
 
 // Triggers the server repull (POST /api/cvent/event/repull) and polls
@@ -233,13 +218,11 @@ export async function refresh(onComplete) {
   }
   if (repullRunning) return; // a repull is already in flight
   repullRunning = true;
-  notifyRepull(true);
   try {
     const res = await fetch(API + "/event/repull", { method: "POST" });
     if (!res.ok) throw new Error("HTTP " + res.status);
   } catch (e) {
     repullRunning = false;
-    notifyRepull(false);
     if (onComplete) onComplete(e);
     return;
   }
@@ -248,18 +231,13 @@ export async function refresh(onComplete) {
     try {
       st = await fetchJSON(API + "/event/repull-status");
     } catch (e) {
-      notifyRepull(true); // transient failure — still running, keep the button dim
-      return;
+      return; // transient failure — still running, try again next tick
     }
-    if (st.running) {
-      notifyRepull(true); // repull still in flight on this tick
-      return;
-    }
+    if (st.running) return; // repull still in flight on this tick
     clearInterval(pollTimer);
     pollTimer = null;
     repullRunning = false;
     bustCache();
-    notifyRepull(false);
     if (onComplete) onComplete(null);
   }, POLL_MS);
 }
@@ -306,8 +284,8 @@ function toastMsg(msg) {
 /* ---------- home dashboard (Task 10) ----------
    All numbers, badges and labels come from the fetched payloads — nothing
    data-derived is hardcoded. Data strings go through esc() before innerHTML.
-   Static and live share one render path (same field names); only the
-   Re-pull button visibility differs (no server to repull in static mode). */
+   Static and live share one render path (same field names); refresh lives in
+   the topbar (app.js), so the views carry no repull controls. */
 
 const esc = escapeHtml; // one small escape helper, per the render rules
 
@@ -370,17 +348,14 @@ function sectionTitle(label, badgeHtml) {
   );
 }
 
-// Header card: title, code, dates, format badge, stale/snapshot state,
-// Re-pull (live only).
+// Header card: title, code, dates, format badge, stale/snapshot state.
+// (Refresh lives in the topbar — app.js — not here.)
 function headerCard(bundle) {
   const ev = bundle.event || {};
   const badges = [];
   if (bundle.snapshot) badges.push('<span class="badge badge-slate">Snapshot</span>');
   if (bundle.stale) badges.push('<span class="badge badge-amber">Stale</span>');
   if (ev.format) badges.push('<span class="badge badge-slate">' + esc(ev.format) + "</span>");
-  const repull = bundle.snapshot
-    ? ""
-    : '<button class="btn" data-repull type="button">Re-pull</button>';
   return card(
     '<div class="head-row">' +
     "<div><div class=\"dash-title\">" + esc(ev.title || "Event dashboard") + "</div>" +
@@ -389,7 +364,7 @@ function headerCard(bundle) {
     (bundle.code && (ev.start || ev.end) ? " · " : "") +
     esc(fmtRange(ev.start, ev.end)) +
     "</div></div>" +
-    '<div class="badge-row">' + badges.join("") + repull + "</div>" +
+    '<div class="badge-row">' + badges.join("") + "</div>" +
     "</div>"
   );
 }
@@ -588,13 +563,10 @@ function dashboardHtml(bundle, payments) {
   );
 }
 
-// Wires the rendered dashboard: the Re-pull button (live mode) tracks the
-// module's repull state on the 3s poll ticks, and the "Show all" expanders
-// reveal their hidden rows in place. Returns nothing; the repull
-// unsubscribe is stashed on the mount so the next load can drop it.
-function wireDashboard(mount, bundle) {
-  // "Show all (N)" expanders: reveal the hidden <tbody data-more> of the
-  // button's own card, in place.
+// Wires the rendered dashboard: the "Show all (N)" expanders reveal their
+// hidden rows in place. (Refresh is a topbar control — app.js — so there is
+// nothing view-local to wire for repulls.)
+function wireDashboard(mount) {
   mount.querySelectorAll("[data-expand]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const scope = btn.closest(".card") || mount;
@@ -603,47 +575,18 @@ function wireDashboard(mount, bundle) {
       btn.remove();
     });
   });
-  if (bundle.snapshot) return;
-  const btn = mount.querySelector("[data-repull]");
-  if (!btn) return;
-  let wasPulling = false;
-  mount.__unsubRepull = subscribeRepull((running) => {
-    btn.disabled = running;
-    btn.textContent = running ? "Pulling…" : "Re-pull";
-    if (running && !wasPulling) {
-      wasPulling = true;
-    } else if (!running && wasPulling) {
-      wasPulling = false;
-      // Repull just finished: re-fetch both payloads, re-render in place
-      // (only while this view is still the current route).
-      const h = (location.hash || "").replace(/^#/, "") || "/";
-      if (h === "/") loadHome(mount);
-    }
-  });
-  btn.addEventListener("click", () => refresh(null));
-}
-
-// Drop the repull observer stashed by wireDashboard (avoids accumulating
-// observers across re-entries: hashchange, retry, repull completion).
-function unwireDashboard(mount) {
-  if (typeof mount.__unsubRepull === "function") {
-    mount.__unsubRepull();
-    mount.__unsubRepull = null;
-  }
 }
 
 export function home(mount) {
-  unwireDashboard(mount);
   loadHome(mount);
 }
 
 function loadHome(mount) {
-  unwireDashboard(mount);
   mount.innerHTML = skeletonHtml(5);
   Promise.all([getEvent(), getPayments()])
     .then(([bundle, payments]) => {
       mount.innerHTML = dashboardHtml(bundle, payments);
-      wireDashboard(mount, bundle);
+      wireDashboard(mount);
     })
     .catch((e) => {
       const msg = (e && e.message) ? e.message : "unknown error";
