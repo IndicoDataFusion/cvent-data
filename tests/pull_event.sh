@@ -14,6 +14,12 @@
 #   <dest>/discounts.json
 #   <dest>/emails.json            email campaigns (incl. htmlBody)
 #   <dest>/event-questions.json   registration/survey questions
+#   <dest>/orders.json            payment status: amountOrdered/Paid/Due per attendee
+#   <dest>/order-items.json       order line items
+#   <dest>/transactions.json      payment events (success flag, method, type)
+#   <dest>/transaction-items.json
+#   <dest>/fee-items.json         pricing (fee items per admission item)
+#   <dest>/admission-items.json   admission/badge types
 #   <dest>/_pages/                raw per-page responses (kept for debugging)
 #
 # Each merged file is {"source": …, "totalCount": N, "data": […]}.
@@ -135,5 +141,27 @@ pull_list emails "$API_BASE/events/$event_id/emails"
 log "pulling event-questions"
 pull_list event-questions "$API_BASE/event-questions" \
   -G --data-urlencode "filter=event.id eq '$event_id'"
+
+# --- payment status (needs event/orders:read + event/transactions:read) --------------
+log "pulling orders"
+pull_list orders "$API_BASE/events/$event_id/orders"
+
+log "pulling order items"
+pull_list order-items "$API_BASE/events/$event_id/orders/items"
+
+log "pulling transactions"
+pull_list transactions "$API_BASE/events/$event_id/transactions"
+
+log "pulling transaction items"
+pull_list transaction-items "$API_BASE/events/$event_id/transactions/items"
+
+# --- pricing structure (needs event/fee-items:read + event/admission-items:read) -----
+log "pulling fee-items"
+pull_list fee-items "$API_BASE/events/$event_id/fee-items"
+
+log "pulling admission-items"
+pull_list admission-items "$API_BASE/admission-items/filter" \
+  -X POST -H 'Content-Type: application/json' \
+  --data "{\"filter\":\"event.id eq '$event_id'\"}"
 
 pass "pull_event.sh — data in $dest (raw pages in $dest/_pages)"
