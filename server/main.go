@@ -31,8 +31,9 @@ type server struct {
 // sourceHandler serves the /api/<source>/… subtree for one source.
 type sourceHandler func(s *server, w http.ResponseWriter, r *http.Request)
 
-// sources is the registry of /api/<source>/… handlers. main() registers the
-// "cvent" group (handlers.go) with the client/cache it constructs there.
+// sources is the registry of /api/<source>/… handlers. buildRouter
+// registers the "cvent" group (handlers.go) with the client/cache it
+// constructs there.
 var sources = map[string]sourceHandler{}
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -243,6 +244,32 @@ func loadEnv(path string) map[string]string {
 	return out
 }
 
+// buildRouter wires the HTTP mux: /api/ (source registry), /data/ (dump
+// snapshots), and the static web dir with SPA fallback. main() and the tests
+// share it.
+func buildRouter(s *server) http.Handler {
+	// Task 6: construct the Cvent client + event cache. The "cvent" source is
+	// registered unconditionally — even when credentials are missing — so the
+	// router finds it and handleAPI's nil-client branch answers 503 "cvent
+	// credentials not configured" for every /api/cvent/… route. Static serving
+	// and /api/health keep working either way.
+	if cid, sec, base, err := loadCventEnv(); err != nil {
+		log.Printf("cvent: %v — /api/cvent/… will return 503 until credentials are configured", err)
+	} else {
+		client := newCventClient(base, cid, sec)
+		s.cvent = newCventHandlers(s.eventID, client, newEventCache(client))
+	}
+	sources["cvent"] = func(srv *server, w http.ResponseWriter, r *http.Request) {
+		srv.cvent.route(w, r)
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/api/", http.HandlerFunc(s.handleAPI))
+	mux.Handle("/data/", http.HandlerFunc(s.handleData))
+	mux.Handle("/", http.HandlerFunc(s.handleStatic))
+	return mux
+}
+
 func main() {
 	var addr, webDir, dataDir, eventID, dumpDir string
 	flag.StringVar(&addr, "addr", ":8766", "listen address")
@@ -273,23 +300,7 @@ func main() {
 
 	s := &server{webDir: webDir, dataDir: dataDir, eventID: eventID}
 
-	// Task 6: construct the Cvent client + event cache. Missing credentials are
-	// not fatal: static serving and /api/health keep working; the /api/cvent/…
-	// routes answer 503 "cvent credentials not configured" instead.
-	if cid, sec, base, err := loadCventEnv(); err != nil {
-		log.Printf("cvent: %v — /api/cvent/… will return 503 until credentials are configured", err)
-	} else {
-		client := newCventClient(base, cid, sec)
-		s.cvent = newCventHandlers(eventID, client, newEventCache(client))
-		sources["cvent"] = func(srv *server, w http.ResponseWriter, r *http.Request) {
-			srv.cvent.route(w, r)
-		}
-	}
-
-	mux := http.NewServeMux()
-	mux.Handle("/api/", http.HandlerFunc(s.handleAPI))
-	mux.Handle("/data/", http.HandlerFunc(s.handleData))
-	mux.Handle("/", http.HandlerFunc(s.handleStatic))
+	mux := buildRouter(s)
 
 	srv := &http.Server{
 		Addr:              addr,
