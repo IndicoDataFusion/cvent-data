@@ -14,11 +14,14 @@
  *      view re-fetches when it finishes.
  *   4. Service-worker registration — guarded: sw.js must exist (plain
  *      fetch probe) AND the page must be https or localhost, otherwise
- *      registration is skipped silently. sw.js arrives in Task 12; a
- *      404 probe must never throw.
+ *      registration is skipped silently. The probe is an awaited fetch:
+ *      a non-OK response means "not there yet, skip"; a network failure
+ *      rejects, which the surrounding try/catch also skips.
  *   5. Offline banner: browser online/offline events plus the
- *      'cvent-data-offline' window event (detail = message) that the
- *      Task 12 worker dispatches via a BroadcastChannel fallback.
+ *      'cvent-data-offline' window event (detail = message). The worker
+ *      can't dispatch window events, so it posts {type:'offline', url}
+ *      on the "cvent-data" BroadcastChannel and this file forwards it to
+ *      that window event.
  */
 
 import { SOURCES } from "./sources/registry.js";
@@ -91,9 +94,10 @@ async function registerSW() {
     location.hostname === "127.0.0.1";
   if (!secure) return;
   try {
-    // Probe first: sw.js does not exist until Task 12, and the SPA
-    // fallback would serve index.html for a bare 404 path on some
-    // configs — a non-OK response means "not there yet, skip".
+    // Probe before registering: a non-OK response (404, or the SPA
+    // fallback serving index.html for an unknown path) means the worker
+    // is not deployed — skip. A network failure rejects this fetch; the
+    // catch below treats it the same way (skip, silently).
     const res = await fetch("sw.js", { cache: "no-store" });
     if (!res.ok) return;
     await navigator.serviceWorker.register("sw.js");
@@ -114,11 +118,24 @@ function setOffline(on, msg) {
 
 window.addEventListener("offline", () => setOffline(true));
 window.addEventListener("online", () => setOffline(false));
-// Task 12's worker dispatches this when its network-first fetch fails and
-// it serves the cache fallback; detail carries the message to show.
+// The worker dispatches this when its network-first fetch fails and it
+// serves the cache fallback; detail carries the message to show.
 window.addEventListener("cvent-data-offline", (e) => {
   setOffline(true, typeof e.detail === "string" ? e.detail : undefined);
 });
+// The worker can't dispatch window events — it posts on BroadcastChannel
+// instead; forward to the window event above (same page, same channel).
+if (typeof BroadcastChannel === "function") {
+  new BroadcastChannel("cvent-data").addEventListener("message", (e) => {
+    if (e.data && e.data.type === "offline") {
+      window.dispatchEvent(
+        new CustomEvent("cvent-data-offline", {
+          detail: "Offline — showing last fetched data",
+        })
+      );
+    }
+  });
+}
 
 /* ---------- boot ---------- */
 
