@@ -284,6 +284,41 @@ button { font: inherit; cursor: pointer; }
 .empty-state .title { font-size: 14px; font-weight: 600; color: var(--text); }
 .empty-state .hint { font-size: 12px; }
 
+/* ================= home dashboard (Task 10) =================
+   Only the layout/typography rules that can't be composed from the existing
+   card/badge/tbl/empty-state/btn/skeleton classes. Everything else reuses
+   them. */
+.head-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dash-title { font-size: 18px; font-weight: 700; letter-spacing: -0.2px; overflow-wrap: anywhere; }
+.dash-sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+.dash-count { font-size: 34px; font-weight: 700; letter-spacing: -0.5px; font-variant-numeric: tabular-nums; line-height: 1; }
+.badge-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.section-head { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 10px; }
+/* the "Show all (N)" expander — a subtle full-width text button */
+.expander {
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  transition: background .15s ease;
+}
+.expander:active { transform: translateY(1px); background: color-mix(in srgb, var(--text) 5%, transparent); }
+.muted-line { color: var(--muted); font-size: 12px; margin-top: 10px; }
+/* dashboard specifics: label under the big count, and spacing when two
+   tables stack inside one card (the payments card). */
+.dash-count .dash-sub { margin-top: 4px; }
+.tbl + .tbl { margin-top: 8px; }
+
 /* ================= button ================= */
 .btn {
   display: inline-flex;
