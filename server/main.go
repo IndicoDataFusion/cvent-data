@@ -217,11 +217,12 @@ func loadEnv(path string) map[string]string {
 }
 
 func main() {
-	var addr, webDir, dataDir, eventID string
+	var addr, webDir, dataDir, eventID, dumpDir string
 	flag.StringVar(&addr, "addr", ":8766", "listen address")
 	flag.StringVar(&webDir, "web", "web", "directory containing web assets")
 	flag.StringVar(&dataDir, "data", "data", "directory for fetched data caches")
 	flag.StringVar(&eventID, "event", defaultEventID, "Cvent event ID (overridable via CVENT_EVENT in .env)")
+	flag.StringVar(&dumpDir, "dump", "", "one-shot dump mode: fetch the event bundle once, write the snapshot under <dir>/<code>/, then exit (no HTTP server)")
 	flag.Parse()
 
 	// If --event was left at its default, CVENT_EVENT takes over: first the
@@ -234,6 +235,13 @@ func main() {
 		} else if v := loadEnv(".env")["CVENT_EVENT"]; v != "" {
 			eventID = v
 		}
+	}
+
+	// --dump is one-shot: fetch the configured event's bundle once, write
+	// the snapshot, and exit. Missing credentials are fatal here (no
+	// server-start fallback).
+	if dumpDir != "" {
+		os.Exit(runDump(eventID, dumpDir))
 	}
 
 	s := &server{webDir: webDir, dataDir: dataDir, eventID: eventID}

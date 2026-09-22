@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 data/
 *.json.bak
+# build artifacts
+/cvent-data-server
+server/server
