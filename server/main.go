@@ -22,14 +22,17 @@ type server struct {
 	webDir  string // directory containing web assets
 	dataDir string // directory for fetched data caches (unused until later tasks)
 	eventID string // the one and only event this app serves
+	// cvent is the single-event API handler group (Task 6). Nil when Cvent
+	// credentials could not be loaded: /api/cvent/… then answers 503 while
+	// static serving and /api/health keep working.
+	cvent *cventHandlers
 }
 
 // sourceHandler serves the /api/<source>/… subtree for one source.
 type sourceHandler func(s *server, w http.ResponseWriter, r *http.Request)
 
-// sources is the registry of /api/<source>/… handlers. The "cvent" group
-// (cvent.go, event.go, payments.go) is wired in a later task.
-// TODO(task 2): "cvent": cventHandler,
+// sources is the registry of /api/<source>/… handlers. main() registers the
+// "cvent" group (handlers.go) with the client/cache it constructs there.
 var sources = map[string]sourceHandler{}
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -59,6 +62,10 @@ func (s *server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	h, ok := sources[source]
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown source"})
+		return
+	}
+	if source == "cvent" && s.cvent == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "cvent credentials not configured"})
 		return
 	}
 	h(s, w, r)
@@ -197,7 +204,7 @@ func loadEnv(path string) map[string]string {
 			continue
 		}
 		k = strings.TrimSpace(k)
-		v = strings.Trim(strings.TrimSpace(v), `"` + "'")
+		v = strings.Trim(strings.TrimSpace(v), `"`+"'")
 		if k == "" {
 			continue
 		}
@@ -230,6 +237,19 @@ func main() {
 	}
 
 	s := &server{webDir: webDir, dataDir: dataDir, eventID: eventID}
+
+	// Task 6: construct the Cvent client + event cache. Missing credentials are
+	// not fatal: static serving and /api/health keep working; the /api/cvent/…
+	// routes answer 503 "cvent credentials not configured" instead.
+	if cid, sec, base, err := loadCventEnv(); err != nil {
+		log.Printf("cvent: %v — /api/cvent/… will return 503 until credentials are configured", err)
+	} else {
+		client := newCventClient(base, cid, sec)
+		s.cvent = newCventHandlers(eventID, client, newEventCache(client))
+		sources["cvent"] = func(srv *server, w http.ResponseWriter, r *http.Request) {
+			srv.cvent.route(w, r)
+		}
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", http.HandlerFunc(s.handleAPI))

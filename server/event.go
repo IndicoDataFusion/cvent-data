@@ -221,6 +221,27 @@ func (ec *eventCache) stamped(b *EventBundle) *EventBundle {
 	return &cp
 }
 
+// eventUUID returns the resolved event uuid for code, read from the cached
+// bundle's Event field WITHOUT fetching (no fan-out, no negative cache
+// consult). ok is false when there is no cached bundle or its Event field
+// has no resolvable uuid. Task 6's check-in handler uses this to reach
+// /events/{uuid}/check-in.
+func (ec *eventCache) eventUUID(code string) (string, bool) {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	e, ok := ec.entries[code]
+	if !ok || e.bundle == nil || len(e.bundle.Event) == 0 {
+		return "", false
+	}
+	var ev struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(e.bundle.Event, &ev); err != nil || !isUUID(ev.ID) {
+		return "", false
+	}
+	return ev.ID, true
+}
+
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // isUUID reports whether s looks like a UUID (8-4-4-4-12 hex).
