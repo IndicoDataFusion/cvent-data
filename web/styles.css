@@ -447,3 +447,40 @@ button { font: inherit; cursor: pointer; }
   .expander::after { content: ""; position: absolute; inset: -4px; }
   .tbl tbody tr::after { content: ""; position: absolute; inset: 0 -4px; }
 }
+
+/* ================= attendees view (Task 11) =================
+   Only the layout/typography rules that can't be composed from the
+   existing card/badge/tbl/empty-state/btn/skeleton/bottom-sheet classes. */
+.search-input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+.search-input::placeholder { color: var(--muted); }
+.att-count-line { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+.tbl .muted-cell { color: var(--muted); overflow-wrap: anywhere; }
+.tbl .mono-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* sheet header: title block left, close button right */
+.sheet-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.sheet-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+.sheet-close svg { width: 16px; height: 16px; }
+.sheet-sec { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 16px 0 8px; }
+/* answer key/value list (the sheet's Answers block) */
+.kv-list { margin: 0; display: grid; gap: 6px; }
+.kv-list dt { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.kv-list dd { margin: 0 0 4px; font-size: 14px; overflow-wrap: anywhere; }

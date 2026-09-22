@@ -284,19 +284,23 @@ function skeletonHtml(rows) {
   return '<div class="card"><div class="skeleton">' + rs + "</div></div>";
 }
 
-// One-line empty state (the attendees placeholder until Task 11): the
-// design language (card + empty-state + dynamic badges) is verifiable now.
-function placeholderHtml(titleHtml, bundle) {
-  const badges =
-    (bundle && bundle.snapshot ? '<span class="badge badge-slate">Snapshot</span>' : "") +
-    (bundle && bundle.stale ? '<span class="badge badge-amber">Stale</span>' : "");
-  return (
-    '<div class="card"><div class="empty-state">' +
-    '<div class="icon">' + ICON + "</div>" +
-    '<div class="title">' + titleHtml + badges + "</div>" +
-    '<div class="hint">This view lands in the next task.</div>' +
-    "</div></div>"
-  );
+/* ---------- toast (Task 11; styles.css .toast — no helper existed before) ----------
+
+   One toast element at a time (replaced per call, auto-dismissed). Used by
+   the attendee check-in (success + error paths). */
+function toastMsg(msg) {
+  const old = document.getElementById("cvent-toast");
+  if (old) old.remove();
+  const t = document.createElement("div");
+  t.id = "cvent-toast";
+  t.className = "toast";
+  t.textContent = String(msg || "Error");
+  document.body.appendChild(t);
+  t.classList.add("show"); // opacity transition in (styles.css .toast.show)
+  setTimeout(() => {
+    t.classList.remove("show");
+    setTimeout(() => t.remove(), 300);
+  }, 2600);
 }
 
 /* ---------- home dashboard (Task 10) ----------
@@ -651,21 +655,386 @@ function loadHome(mount) {
     });
 }
 
-// Attendees view (search + detail sheet — real rendering in Task 11).
-export function attendees(mount) {
-  mount.innerHTML = skeletonHtml(5);
-  getEvent()
-    .then((b) => searchAttendees("", 1, 0).then((r) => ({ b, total: r.total })))
-    .then(({ b, total }) => {
-      const title = escapeHtml((b && b.event && b.event.title) || "Attendees");
-      // Dynamic count badge (never hardcoded markup): the total from the
-      // data access, so a zero-row event reads "0" — CONF27's real state.
-      const count = Number.isFinite(total) && total >= 0
-        ? ' <span class="badge badge-slate">' + total + "</span>"
-        : "";
-      mount.innerHTML = placeholderHtml(title + count, b);
-    })
-    .catch(() => {
-      mount.innerHTML = placeholderHtml("Couldn't load attendees", null);
-    });
+/* ---------- module state: the open attendee sheet (one at a time) ----------
+   Tracked at module level so a route change (app.js clears the mount) can
+   close it and restore body scroll. */
+let sheetEl = null;
+function closeSheet() {
+  if (sheetEl) {
+    sheetEl.remove();
+    sheetEl = null;
+  }
+  document.body.style.overflow = ""; // restore body scroll
 }
+
+/* ---------- attendees view (Task 11) ----------
+   Search (300 ms debounce) + table + bottom-sheet detail + optimistic
+   check-in. Same render rules as the dashboard: every data string through
+   esc(), skeleton rows while the first search loads, an error card with
+   Retry on failure, no console.log, no hardcoded event code. Static and
+   live share one render path — the only differences are the Snapshot
+   badge (sheet header), the hidden check-in button, and the static-mode
+   file search inside searchAttendees.
+
+   Attendee field ground truth (openapi.json "attendee" schema; CONF27's
+   pulled sample is empty, so the schema wins):
+     name        contact.{firstName,middleName,lastName} — no top-level name
+     email       contact.email — no top-level email
+     ticket      registrationType is a Lookup {id, code, name} → .name
+     confirmation confirmationNumber (top-level string)
+     checkedIn   top-level BOOLEAN (true = checked in); the checkIn
+                 date-time is a separate, non-boolean field
+     answers     [{ question: {id}, value: [string, ...] }] — the
+                 question object carries ONLY an id (no text), so the
+                 label is the raw question id
+     due amount  NOT present: the attendee object carries no order or
+                 payment data → no due column (no fabricated join)
+     activities  NOT embedded on the attendee → no activities block
+     transactions NOT embedded on the attendee → no transactions block */
+
+function attendeeName(a) {
+  const c = (a && a.contact) || {};
+  return [c.firstName, c.middleName, c.lastName].filter(Boolean).join(" ").trim();
+}
+
+// Checked-in = the boolean flag; a truthy checkIn date-time counts too
+// (defensive — the schema says the boolean is authoritative).
+function attendeeCheckedIn(a) {
+  return !!(a && (a.checkedIn === true || a.checkIn));
+}
+
+function attendeeEmail(a) {
+  return (a && a.contact && a.contact.email) || (a && a.email) || "";
+}
+
+function attendeeTicket(a) {
+  const rt = a && a.registrationType;
+  if (!rt || typeof rt !== "object") return "";
+  return rt.name || rt.code || "";
+}
+
+// answers: [{ question: {id}, value: [string, ...] }]. The question object
+// carries no text (only an id), so the row label is the raw question id.
+function attendeeAnswers(a) {
+  const list = Array.isArray(a && a.answers) ? a.answers : [];
+  return list.map((ans) => {
+    const q = (ans && ans.question) || {};
+    const label = q.id || "question";
+    const vals = Array.isArray(ans.value)
+      ? ans.value
+      : ans.value != null && ans.value !== ""
+        ? [ans.value]
+        : [];
+    return { label, vals };
+  });
+}
+
+function attendeeSheetHtml(a) {
+  const name = attendeeName(a);
+  const conf = a.confirmationNumber || "";
+  const ticket = attendeeTicket(a);
+  const checked = attendeeCheckedIn(a);
+  const headBadges =
+    (STATIC ? '<span class="badge badge-slate">Snapshot</span>' : "") +
+    (ticket ? '<span class="badge badge-slate">' + esc(ticket) + "</span>" : "") +
+    (checked
+      ? '<span class="badge badge-green">Checked in</span>'
+      : '<span class="badge badge-amber">Not checked in</span>');
+  let inner =
+    '<div class="sheet-head-row"><div>' +
+    "<h2>" + esc(name || "Attendee") + "</h2>" +
+    '<div class="sheet-meta">' +
+    (conf ? esc(conf) : "") +
+    (conf && a.checkIn ? " · " : "") +
+    (a.checkIn ? "in " + esc(fmtDate(a.checkIn)) : "") +
+    "</div></div>" +
+    '<button class="sheet-close" data-sheet-close type="button" aria-label="Close">' +
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>' +
+    "</button></div>" +
+    '<div class="badge-row">' + headBadges + "</div>";
+  const answers = attendeeAnswers(a);
+  if (answers.length) {
+    inner += '<div class="sheet-sec">Answers</div><dl class="kv-list">';
+    for (const ans of answers) {
+      inner +=
+        "<dt>" + esc(ans.label) + "</dt><dd>" +
+        (ans.vals.length ? ans.vals.map((v) => esc(v)).join(", ") : "—") + "</dd>";
+    }
+    inner += "</dl>";
+  }
+  // Check in: live mode only. Already checked in → disabled 'Checked in'
+  // (check-out is out of scope for v1). Static mode → no button (the
+  // Snapshot badge above marks the snapshot state).
+  if (a.id && !STATIC) {
+    inner += checked
+      ? '<button class="btn" disabled type="button">Checked in</button>'
+      : '<button class="btn" data-checkin type="button">Check in</button>';
+  }
+  return inner;
+}
+
+// POST /api/cvent/event/checkin. Client body (the plan contract the server
+// handler implements, handlers.go handleCheckin): { attendeeIds: [uuid] }.
+// The server maps it onto the Cvent bulk-checkin spec and returns
+// { ok: true } on success; errors surface as non-OK JSON { error }.
+async function checkInAttendee(id) {
+  const res = await fetch(API + "/event/checkin", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ attendeeIds: [id] }),
+  });
+  if (!res.ok) {
+    let msg = "HTTP " + res.status;
+    try {
+      const j = await res.json();
+      if (j && j.error) msg = j.error;
+    } catch (e) { /* keep the HTTP message */ }
+    throw new Error(msg);
+  }
+}
+
+function searchCardHtml(value) {
+  return card(
+    '<input class="search-input" data-search type="search" ' +
+    'placeholder="Search name, email, or confirmation number" ' +
+    'aria-label="Search attendees" value="' + esc(value || "") + '">'
+  );
+}
+
+// The table card: count line, the table over ALL loaded rows (state.items),
+// and the Load-more button with the remaining count. The two empty states
+// live here too: "No attendees yet" (no q, total 0) vs "No matches for q".
+function attendeesTableHtml(st) {
+  const r = st.result;
+  if (!r) return "";
+  if (r.total === 0) {
+    if (st.q) {
+      return card(
+        '<div class="empty-state">' +
+        '<div class="icon">' + ICON + "</div>" +
+        '<div class="title">No matches for “' + esc(st.q) +
+        "”</div></div>"
+      );
+    }
+    return card(
+      '<div class="empty-state">' +
+      '<div class="icon">' + ICON + "</div>" +
+      '<div class="title">No attendees yet</div>' +
+      '<div class="hint">Registrations will appear here once the event has ' +
+      "attendees.</div></div>"
+    );
+  }
+  const rows = st.items
+    .map((a, i) => {
+      const checked = attendeeCheckedIn(a);
+      return (
+        '<tr data-row="' + i + '">' +
+        "<td>" + esc(attendeeName(a) || "—") + "</td>" +
+        '<td class="muted-cell">' + esc(attendeeEmail(a) || "—") + "</td>" +
+        "<td>" + esc(attendeeTicket(a) || "—") + "</td>" +
+        '<td class="mono-cell">' + esc(a.confirmationNumber || "—") + "</td>" +
+        "<td>" +
+        (checked
+          ? '<span class="badge badge-green">Checked in</span>'
+          : '<span class="badge badge-slate">Not checked in</span>') +
+        "</td></tr>"
+      );
+    })
+    .join("");
+  const remaining = Math.max(r.total - (r.offset + r.limit), 0);
+  return (
+    card('<div class="att-count-line">' + esc(r.total) + " attendees</div>") +
+    card(
+      '<table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Ticket</th>' +
+      "<th>Confirmation</th><th>Check-in</th></tr></thead><tbody>" +
+      rows + "</tbody></table>" +
+      (remaining > 0
+        ? '<button class="expander" data-loadmore type="button">Load more (' +
+          esc(remaining) + ")</button>"
+        : "")
+    )
+  );
+}
+
+export function attendees(mount) {
+  closeSheet(); // route change — drop any open sheet + restore body scroll
+  const state = { q: "", items: [], result: null, loading: false };
+
+  // The one search listener, re-attached after every re-render (mount
+  // innerHTML replacement drops it). 300 ms debounce per the view spec.
+  const onSearch = (e) => {
+    const v = (e && e.target && e.target.value) || "";
+    clearTimeout(state.debounce);
+    state.debounce = setTimeout(() => {
+      state.q = v.trim();
+      load(0);
+    }, 300);
+  };
+
+  // Full re-render of the view: search card + (skeleton | table | error).
+  // The typed input value is preserved across re-renders.
+  function render(mnt, bodyHtml) {
+    const inp = mnt.querySelector("[data-search]");
+    const keep = inp && inp.value != null ? inp.value : state.q;
+    mnt.innerHTML = searchCardHtml(keep) + bodyHtml;
+    const ni = mnt.querySelector("[data-search]");
+    if (ni) {
+      ni.addEventListener("input", onSearch);
+      ni.value = keep; // keep the text even if the attr was already set
+    }
+    wireTable(mnt);
+  }
+
+  function wireTable(mnt) {
+    mnt.querySelectorAll("[data-row]").forEach((tr) => {
+      const i = Number(tr.getAttribute("data-row"));
+      const a = state.items[i];
+      if (!a) return;
+      tr.addEventListener("click", () => openSheet(a));
+    });
+    const lm = mnt.querySelector("[data-loadmore]");
+    if (lm) {
+      lm.addEventListener("click", () => {
+        if (state.loading) return;
+        const y = window.scrollY; // restore after the append
+        lm.disabled = true;
+        load(state.result.offset + state.result.limit).then(() => {
+          window.scrollTo(0, y);
+          const b = mnt.querySelector("[data-loadmore]");
+          if (b) b.disabled = false;
+        });
+      });
+    }
+  }
+
+  async function load(offset) {
+    if (state.loading) {
+      // A search typed mid-flight must not be dropped: remember it and
+      // re-run it when the in-flight load settles.
+      if (offset === 0) state.pendingSearch = true;
+      return;
+    }
+    state.loading = true;
+    if (!state.result) render(mount, skeletonHtml(6)); // skeleton: first load
+    let r;
+    try {
+      r = await searchAttendees(state.q, 50, offset);
+    } catch (e) {
+      state.loading = false;
+      if (state.pendingSearch) {
+        state.pendingSearch = false;
+        load(0);
+        return;
+      }
+      if (!state.result) {
+        const msg = e && e.message ? e.message : "unknown error";
+        render(
+          mount,
+          card(
+            '<div class="empty-state">' +
+            '<div class="title">Couldn&#39;t load attendees</div>' +
+            '<div class="hint" data-err></div>' +
+            '<button class="btn" data-retry type="button">Retry</button></div>'
+          )
+        );
+        const hint = mount.querySelector("[data-err]");
+        if (hint) hint.textContent = msg;
+        const retry = mount.querySelector("[data-retry]");
+        if (retry) retry.addEventListener("click", () => load(0));
+      } else {
+        // Load-more failure: keep the table, toast the error.
+        const msg = e && e.message ? e.message : "unknown error";
+        toastMsg("Couldn't load more attendees: " + msg);
+        const b = mount.querySelector("[data-loadmore]");
+        if (b) b.disabled = false;
+      }
+      return;
+    }
+    state.loading = false;
+    state.result = r;
+    state.items = offset === 0 ? r.items : state.items.concat(r.items);
+    if (state.pendingSearch) {
+      state.pendingSearch = false;
+      load(0); // a search was typed mid-flight — run it now
+      return;
+    }
+    render(mount, attendeesTableHtml(state));
+  }
+
+  function openSheet(a) {
+    closeSheet(); // one sheet at a time
+    const wrap = document.createElement("div");
+    wrap.className = "bottom-sheet";
+    wrap.innerHTML =
+      '<div class="sheet-backdrop" data-sheet-close></div>' +
+      '<div class="sheet-panel"><span class="sheet-handle" data-sheet-close></span>' +
+      attendeeSheetHtml(a) +
+      "</div>";
+    (document.body || document).appendChild(wrap);
+    document.body.style.overflow = "hidden"; // body scroll lock (house-style)
+    // Delegation on the wrapper only — innerHTML swaps (check-in flips)
+    // never orphan the close/check-in listeners.
+    wrap.addEventListener("click", (e) => {
+      const t = e && e.target;
+      if (!t || !t.closest) return;
+      if (t.closest("[data-sheet-close]")) closeSheet();
+      else if (t.closest("[data-checkin]")) doCheckin(a);
+    });
+    sheetEl = wrap;
+  }
+
+  // Swap just this row's check-in badge (no full re-render, so scroll and
+  // the open sheet are undisturbed).
+  function paintChecked(a, checked) {
+    const i = state.items.indexOf(a);
+    if (i < 0) return;
+    const tr = mount.querySelector('[data-row="' + i + '"]');
+    const td = tr && tr.children[tr.children.length - 1];
+    if (!td) return;
+    td.innerHTML = checked
+      ? '<span class="badge badge-green">Checked in</span>'
+      : '<span class="badge badge-slate">Not checked in</span>';
+  }
+
+  // Optimistic check-in: flip the row badge + sheet button NOW, POST, then
+  // keep the flip on success or revert both + error toast on failure.
+  function doCheckin(a) {
+    if (!a.id || state.loading) return;
+    const was = !!a.checkedIn;
+    a.checkedIn = true; // optimistic flip (data + UI)
+    paintChecked(a, true);
+    if (sheetEl) {
+      // Re-render the sheet panel (button → disabled 'Checked in'); the
+      // wrapper keeps its delegated listeners.
+      const panel = sheetEl.querySelector(".sheet-panel");
+      if (panel) {
+        panel.innerHTML =
+          '<span class="sheet-handle" data-sheet-close></span>' +
+          attendeeSheetHtml(a);
+      }
+    }
+    checkInAttendee(a.id)
+      .then(() => {
+        toastMsg("Checked in");
+      })
+      .catch((e) => {
+        a.checkedIn = was; // revert the data
+        paintChecked(a, false);
+        if (sheetEl) {
+          const panel = sheetEl.querySelector(".sheet-panel");
+          if (panel) {
+            panel.innerHTML =
+              '<span class="sheet-handle" data-sheet-close></span>' +
+              attendeeSheetHtml(a);
+          }
+        }
+        const msg = e && e.message ? e.message : "unknown error";
+        toastMsg("Check-in failed: " + msg);
+      });
+  }
+
+  render(mount, skeletonHtml(6)); // initial: search + skeleton
+  load(0);
+}
+
