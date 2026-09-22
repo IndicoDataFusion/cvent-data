@@ -826,6 +826,111 @@ func TestEventResourceSet(t *testing.T) {
 	}
 }
 
+// TestBundleCopyIsolation pins the cache-poisoning contract: every bundle()
+// read (miss, in-flight waiter, and subsequent hit) returns an isolated copy
+// whose Counts and Errors maps are independent of the cached entry — mutating
+// a returned bundle must never be visible to another caller or to the cache.
+// (Shared json.RawMessage field headers are acceptable: raw JSON bytes are
+// never mutated by callers.)
+func TestBundleCopyIsolation(t *testing.T) {
+	// (a) Miss path: the first bundle() caller mutates the returned bundle's
+	// Counts and Errors maps; a second bundle() call must see the originals.
+	{
+		m := newCventMock(t)
+		m.setEventEndpoints()
+		setAllResources200(m)
+		m.setStatus("/events/"+testUUID+"/discounts", http.StatusForbidden,
+			[]byte(`{"message":"forbidden"}`)) // guarantees a non-nil Errors map
+		ec := newTestEventCache(m)
+		ec.ttl = time.Hour
+		t0 := time.Now()
+		ec.now = func() time.Time { return t0 }
+
+		b1, err := ec.bundle(context.Background(), testCode) // cold cache → miss
+		if err != nil {
+			t.Fatalf("first bundle(): %v", err)
+		}
+		b1.Counts["orders"] = 999
+		if b1.Errors == nil {
+			t.Fatalf("expected a non-nil Errors map (discounts 403), got nil")
+		}
+		b1.Errors["discounts"] = "tampered"
+
+		b2, err := ec.bundle(context.Background(), testCode) // warm cache → hit
+		if err != nil {
+			t.Fatalf("second bundle(): %v", err)
+		}
+		if got := b2.Counts["orders"]; got != 2 {
+			t.Errorf("cache poisoned via miss-path caller: second bundle Counts[orders] = %d, want 2", got)
+		}
+		if got := b2.Errors["discounts"]; got == "tampered" {
+			t.Errorf("cache poisoned via miss-path caller: second bundle Errors[discounts] = %q (tampered)", got)
+		}
+		if !strings.Contains(b2.Errors["discounts"], "403") {
+			t.Errorf("second bundle Errors[discounts] lost the original value: %q", b2.Errors["discounts"])
+		}
+	}
+
+	// (b) In-flight waiters and the subsequent hit path: two concurrent
+	// callers on a cold cache each get an independent Counts/Errors map, and
+	// neither copy is the cached entry.
+	{
+		m := newCventMock(t)
+		m.setEventEndpoints()
+		setAllResources200(m)
+		m.setStatus("/events/"+testUUID+"/discounts", http.StatusForbidden,
+			[]byte(`{"message":"forbidden"}`))
+		ec := newTestEventCache(m)
+		ec.ttl = time.Hour
+		t0 := time.Now()
+		ec.now = func() time.Time { return t0 }
+
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		bundles := make([]*EventBundle, 2)
+		errs := make([]error, 2)
+		for i := 0; i < 2; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				<-start
+				bundles[i], errs[i] = ec.bundle(context.Background(), testCode)
+			}(i)
+		}
+		close(start)
+		wg.Wait()
+		for i, err := range errs {
+			if err != nil {
+				t.Fatalf("concurrent bundle() caller %d: %v", i, err)
+			}
+		}
+		if bundles[0] == bundles[1] {
+			t.Fatal("two concurrent callers shared one *EventBundle pointer")
+		}
+		// Tamper through the second caller's copy.
+		bundles[1].Counts["orders"] = 777
+		bundles[1].Errors["discounts"] = "waiter-tampered"
+		// The first caller's copy must be untouched.
+		if got := bundles[0].Counts["orders"]; got != 2 {
+			t.Errorf("caller 1's copy poisoned via caller 2: Counts[orders] = %d, want 2", got)
+		}
+		if got := bundles[0].Errors["discounts"]; got == "waiter-tampered" {
+			t.Errorf("caller 1's copy poisoned via caller 2: Errors[discounts] = %q", got)
+		}
+		// A later hit-path read must also be untouched.
+		b3, err := ec.bundle(context.Background(), testCode)
+		if err != nil {
+			t.Fatalf("third bundle(): %v", err)
+		}
+		if got := b3.Counts["orders"]; got != 2 {
+			t.Errorf("cache poisoned via in-flight waiter: hit-path Counts[orders] = %d, want 2", got)
+		}
+		if got := b3.Errors["discounts"]; got == "waiter-tampered" {
+			t.Errorf("cache poisoned via in-flight waiter: hit-path Errors[discounts] = %q", got)
+		}
+	}
+}
+
 // TestIsUUID pins the UUID-shape detector: 8-4-4-4-12 hex is a UUID; anything
 // else (codes, wrong lengths, bad separators) is not.
 func TestIsUUID(t *testing.T) {

@@ -123,7 +123,11 @@ func (ec *eventCache) bundle(ctx context.Context, code string) (*EventBundle, er
 	if call, ok := ec.inflight[code]; ok {
 		ec.mu.Unlock()
 		call.wg.Wait()
-		return call.bundle, call.err
+		if call.err != nil {
+			return nil, call.err
+		}
+		// Each waiter gets its own copy, not the fetcher's.
+		return ec.stamped(call.bundle), nil
 	}
 	call := &eventInflight{}
 	call.wg.Add(1)
@@ -147,9 +151,15 @@ func (ec *eventCache) bundle(ctx context.Context, code string) (*EventBundle, er
 	delete(ec.inflight, code)
 	ec.mu.Unlock()
 
+	// call.bundle keeps the canonical fetched bundle (the same pointer the
+	// cache stores); every caller — fetcher and in-flight waiters alike —
+	// receives its own copy via stamped() so no one holds the cached object.
 	call.bundle, call.err = b, err
 	call.wg.Done()
-	return b, err
+	if err != nil {
+		return nil, err
+	}
+	return ec.stamped(b), nil
 }
 
 // invalidate drops the positive cache entry and the negative entry for code,
@@ -184,14 +194,28 @@ func (ec *eventCache) evictOldest() {
 	delete(ec.entries, oldestKey)
 }
 
-// stamped returns a copy of b with Stale derived at read time: true when the
-// bundle is older than 24h. Staleness never triggers a re-fetch here — the
-// UI shows the badge and the user can Re-pull.
+// stamped returns a copy of b safe for hand to a caller: Stale is derived at
+// read time (true when the bundle is older than 24h), and the Counts/Errors
+// maps are deep-copied so caller mutation can never poison the cached entry.
+// Staleness never triggers a re-fetch here — the UI shows the badge and the
+// user can Re-pull.
 func (ec *eventCache) stamped(b *EventBundle) *EventBundle {
 	cp := *b
 	if t, err := time.Parse(time.RFC3339, b.PulledAt); err == nil {
 		if ec.now().Sub(t) > eventStaleTTL {
 			cp.Stale = true
+		}
+	}
+	if b.Counts != nil {
+		cp.Counts = make(map[string]int, len(b.Counts))
+		for k, v := range b.Counts {
+			cp.Counts[k] = v
+		}
+	}
+	if b.Errors != nil {
+		cp.Errors = make(map[string]string, len(b.Errors))
+		for k, v := range b.Errors {
+			cp.Errors[k] = v
 		}
 	}
 	return &cp
