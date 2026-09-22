@@ -6,10 +6,15 @@
 #   [dest-dir]      output directory (default: tests/conf27)
 #
 # Writes:
-#   <dest>/event.json        full event object
-#   <dest>/attendees.json    all attendee rows (paginated, merged)
-#   <dest>/activities.json   all attendee activities (paginated, merged)
-#   <dest>/_pages/           raw per-page responses (kept for debugging)
+#   <dest>/event.json             full event object
+#   <dest>/attendees.json         all attendee rows (paginated, merged)
+#   <dest>/activities.json        all attendee activities (paginated, merged)
+#   <dest>/registration-types.json
+#   <dest>/registration-paths.json
+#   <dest>/discounts.json
+#   <dest>/emails.json            email campaigns (incl. htmlBody)
+#   <dest>/event-questions.json   registration/survey questions
+#   <dest>/_pages/                raw per-page responses (kept for debugging)
 #
 # Each merged file is {"source": …, "totalCount": N, "data": […]}.
 source "$(dirname "$0")/lib.sh"
@@ -110,6 +115,25 @@ pull_list attendees "$API_BASE/attendees/filter" \
 # --- activities -----------------------------------------------------------------
 log "pulling activities (GET /attendees/activities)"
 pull_list activities "$API_BASE/attendees/activities" \
+  -G --data-urlencode "filter=event.id eq '$event_id'"
+
+# --- registration config ----------------------------------------------------------
+log "pulling registration-types"
+pull_list registration-types "$API_BASE/events/$event_id/registration-types"
+
+log "pulling registration-paths"
+pull_list registration-paths "$API_BASE/events/$event_id/registration-paths"
+
+log "pulling discounts"
+pull_list discounts "$API_BASE/events/$event_id/discounts"
+
+# --- emails (campaigns, incl. htmlBody) -------------------------------------------
+log "pulling emails"
+pull_list emails "$API_BASE/events/$event_id/emails"
+
+# --- event questions (registration/survey form) ------------------------------------
+log "pulling event-questions"
+pull_list event-questions "$API_BASE/event-questions" \
   -G --data-urlencode "filter=event.id eq '$event_id'"
 
 pass "pull_event.sh — data in $dest (raw pages in $dest/_pages)"
