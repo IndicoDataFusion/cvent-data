@@ -659,6 +659,34 @@ function loadHome(mount) {
    Tracked at module level so a route change (app.js clears the mount) can
    close it and restore body scroll. */
 let sheetEl = null;
+
+/* Attendees instance sequence: bumped on every attendees() entry so a
+   re-entry (or a route change away) invalidates the previous instance's
+   pending continuations. app.js renders all views into one shared mount
+   and clears it on route change, so a stale instance's debounce timer or
+   in-flight fetch must NOT render into the mount once it has moved on —
+   every async continuation in the attendees view checks isCurrent()
+   (captured per entry) before touching the mount. */
+let attSeq = 0;
+let attDebounce = null; // previous instance's pending search timer (cleared on entry)
+
+/* app.js has no view-unmount hook, so navigation away from the attendees
+   view is observed via the route hash itself. Leaving the attendees route
+   is the "close" path: bump the sequence (invalidating this instance's
+   pending continuations) and close the sheet (restores body scroll).
+   Registered once. */
+let attNavWatch = false;
+function ensureNavWatch() {
+  if (attNavWatch) return;
+  attNavWatch = true;
+  window.addEventListener("hashchange", () => {
+    const h = (location.hash || "").replace(/^#/, "") || "/";
+    if (h !== "/attendees") {
+      attSeq++; // "close": invalidate the torn-down instance
+      closeSheet();
+    }
+  });
+}
 function closeSheet() {
   if (sheetEl) {
     sheetEl.remove();
@@ -858,26 +886,46 @@ function attendeesTableHtml(st) {
 }
 
 export function attendees(mount) {
+  // New instance: bump the sequence (invalidating any previous instance's
+  // pending continuations) and drop the previous instance's pending search
+  // timer. The token is the authoritative stale guard; the clearTimeout is
+  // belt-and-suspenders (the token would no-op the callback anyway).
+  attSeq++;
+  const token = attSeq;
+  const isCurrent = () => token === attSeq;
+  // The shared mount is considered torn down once our search card is no
+  // longer inside it (route-away, or a direct mount clear). The first
+  // render is exempt (the card does not exist yet) — the `rendered` flag
+  // marks that boundary.
+  let rendered = false;
+  const isMounted = () => !rendered || !!mount.querySelector("[data-search]");
+  clearTimeout(attDebounce);
   closeSheet(); // route change — drop any open sheet + restore body scroll
+  ensureNavWatch(); // restore body scroll on navigation-away (no unmount hook)
   const state = { q: "", items: [], result: null, loading: false };
 
   // The one search listener, re-attached after every re-render (mount
-  // innerHTML replacement drops it). 300 ms debounce per the view spec.
+  // innerHTML replacement drops it). 300 ms debounce per the view spec. The
+  // timer is module-level so a re-entry clears the previous instance's.
   const onSearch = (e) => {
     const v = (e && e.target && e.target.value) || "";
-    clearTimeout(state.debounce);
-    state.debounce = setTimeout(() => {
+    clearTimeout(attDebounce);
+    attDebounce = setTimeout(() => {
+      if (!isCurrent() || !isMounted()) return; // navigated away while pending
       state.q = v.trim();
       load(0);
     }, 300);
   };
 
   // Full re-render of the view: search card + (skeleton | table | error).
-  // The typed input value is preserved across re-renders.
+  // The typed input value is preserved across re-renders. No-op when this
+  // instance is no longer current (the shared mount now holds another view).
   function render(mnt, bodyHtml) {
+    if (!isCurrent() || !isMounted()) return;
     const inp = mnt.querySelector("[data-search]");
     const keep = inp && inp.value != null ? inp.value : state.q;
     mnt.innerHTML = searchCardHtml(keep) + bodyHtml;
+    rendered = true;
     const ni = mnt.querySelector("[data-search]");
     if (ni) {
       ni.addEventListener("input", onSearch);
@@ -900,6 +948,7 @@ export function attendees(mount) {
         const y = window.scrollY; // restore after the append
         lm.disabled = true;
         load(state.result.offset + state.result.limit).then(() => {
+          if (!isCurrent() || !isMounted()) return; // navigated away mid-fetch
           window.scrollTo(0, y);
           const b = mnt.querySelector("[data-loadmore]");
           if (b) b.disabled = false;
@@ -909,6 +958,7 @@ export function attendees(mount) {
   }
 
   async function load(offset) {
+    if (!isCurrent() || !isMounted()) return; // stale instance — no-op
     if (state.loading) {
       // A search typed mid-flight must not be dropped: remember it and
       // re-run it when the in-flight load settles.
@@ -922,6 +972,7 @@ export function attendees(mount) {
       r = await searchAttendees(state.q, 50, offset);
     } catch (e) {
       state.loading = false;
+      if (!isCurrent() || !isMounted()) return; // navigated away mid-fetch
       if (state.pendingSearch) {
         state.pendingSearch = false;
         load(0);
@@ -959,6 +1010,7 @@ export function attendees(mount) {
       load(0); // a search was typed mid-flight — run it now
       return;
     }
+    if (!isCurrent() || !isMounted()) return; // navigated away mid-fetch
     render(mount, attendeesTableHtml(state));
   }
 
@@ -1020,6 +1072,9 @@ export function attendees(mount) {
       })
       .catch((e) => {
         a.checkedIn = was; // revert the data
+        const msg = e && e.message ? e.message : "unknown error";
+        toastMsg("Check-in failed: " + msg); // app-level toast: keep even if stale
+        if (!isCurrent() || !isMounted()) return; // no badge/sheet paint onto the new view
         paintChecked(a, false);
         if (sheetEl) {
           const panel = sheetEl.querySelector(".sheet-panel");
@@ -1029,8 +1084,6 @@ export function attendees(mount) {
               attendeeSheetHtml(a);
           }
         }
-        const msg = e && e.message ? e.message : "unknown error";
-        toastMsg("Check-in failed: " + msg);
       });
   }
 
