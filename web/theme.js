@@ -22,7 +22,7 @@
   var STORAGE_KEY = "cvent-data-theme";
   var MODES = ["default", "light", "dark"];
   var LABELS = { default: "Auto", light: "Light", dark: "Dark" };
-  var THEME_COLOR = { light: "#ffffff", dark: "#0f172a" };
+  var THEME_COLOR = { light: "#f5f7f5", dark: "#0d1512" };
 
   var root = document.documentElement;
 

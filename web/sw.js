@@ -16,7 +16,7 @@
  * Bump "v1" to force a full re-precache on next activate.
  */
 
-const STATIC_CACHE = "cvent-data-v1";
+const STATIC_CACHE = "cvent-data-v2";
 const API_CACHE = "cvent-data-api-v1";
 const META_CACHE = "cvent-data-api-meta";
 const OFFLINE_CHANNEL = "cvent-data";
@@ -27,6 +27,7 @@ const PRECACHE = [
   "/sources/registry.js", "/sources/cvent.js", "/manifest.webmanifest",
   "/icons/icon-192.png", "/icons/icon-512.png",
   "/icons/icon-192-maskable.png", "/icons/icon-512-maskable.png",
+  "/fonts/manrope-latin.woff2", "/fonts/space-grotesk-latin.woff2",
 ];
 
 /* ---------- install: precache the static shell, then skipWaiting ---------- */

@@ -1,94 +1,125 @@
 /* Cvent Data PWA — base styles.
-   Theme model (house-style pattern, adapted):
-     - :root            = LIGHT tokens (default when JS is off)
-     - html[data-theme=dark]    = DARK tokens (explicit override)
+   Design language: house style — forest palette, Manrope body +
+   Space Grotesk display, grain overlay, glassy topbar, accent-rail section
+   headers. Ported onto Cvent Data's own class structure.
+
+   Theme model (data-theme, set pre-paint by theme.js from localStorage
+   "cvent-data-theme", values default|light|dark):
+     - :root                            = forest LIGHT (no-JS fallback)
+     - html[data-theme=dark]            = forest DARK (explicit override)
      - @media (prefers-color-scheme: dark) html[data-theme=default]
-                                 = DARK tokens (OS follows in "default" mode)
-   theme.js sets <html data-theme> pre-paint from localStorage
-   (key "cvent-data-theme", values default|light|dark).
-   No gradients on surfaces (hard rule); the only gradient in the file is the
-   .skeleton shimmer sweep, which is the single permitted loading indicator.
+                                         = forest DARK (OS follows in default)
+   No gradients on surfaces; the only gradient is the .skeleton shimmer sweep
+   (the single permitted loading indicator).
 */
 
-:root {
-  --bg: #ffffff;
-  --text: #1f2937;
-  --muted: #6b7280;
-  --card: #f9fafb;
-  --border: #e5e7eb;
-  --accent: #2563eb;
+/* ---------- self-hosted fonts (CSP: font-src 'self') ---------- */
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("fonts/manrope-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: url("fonts/space-grotesk-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
-  /* semantic badge colors (darker in light for contrast on light tints) */
-  --c-amber: #92400e;
-  --c-green: #065f46;
-  --c-red: #991b1b;
+:root {
+  /* forest light palette */
+  --bg: #f5f7f5;
+  --panel: #ffffff;
+  --panel2: #eef2ef;
+  --line: #dbe3dd;
+  --text: #1c2620;
+  --muted: #5a6e65;
+  --dim: #5f7168;
+  --accent: #0f7a58;
+  --accent2: #7d5805;
+  --entree: #c23f2d;
+  --chip: #e9efeb;
+  --chip-active: #d7e4dc;
+
+  /* cvent token aliases (components reference these) */
+  --card: var(--panel);
+  --border: var(--line);
+  --c-amber: var(--accent2);
+  --c-green: var(--accent);
+  --c-red: var(--entree);
   --c-slate: var(--muted);
 
   /* skeleton shimmer (only loading indicator) */
-  --skeleton: #e5e7eb;
-  --skeleton-hi: #f3f4f6;
+  --skeleton: var(--line);
+  --skeleton-hi: var(--panel2);
 
   /* offline banner (amber-tinted) */
-  --offline-bg: #fef3c7;
-  --offline-text: #92400e;
-  --offline-border: #fde68a;
+  --offline-bg: #f6e7bd;
+  --offline-text: #6b4e0a;
+  --offline-border: #ecd79a;
 
-  --shadow: 0 1px 2px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.08);
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --shadow: 0 1px 2px rgba(28, 38, 32, .10), 0 1px 3px rgba(28, 38, 32, .06);
+  --font-sans: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-display: "Space Grotesk", "Manrope", -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-/* ---------- dark theme (explicit override) ---------- */
+/* ---------- forest dark (explicit override) ---------- */
 html[data-theme="dark"] {
-  --bg: #0f172a;
-  --text: #e5e7eb;
-  --muted: #94a3b8;
-  --card: #1e293b;
-  --border: #334155;
-  --accent: #60a5fa;
+  --bg: #0d1512;
+  --panel: #131d19;
+  --panel2: #18241f;
+  --line: #24322c;
+  --text: #e8f0ec;
+  --muted: #8fa39b;
+  --dim: #74877e;
+  --accent: #35c28f;
+  --accent2: #ffd166;
+  --entree: #ff7a6b;
+  --chip: #1e2b25;
+  --chip-active: #2c443a;
 
-  --c-amber: #fbbf24;
-  --c-green: #34d399;
-  --c-red: #f87171;
-  --c-slate: var(--muted);
-
-  --skeleton: #334155;
-  --skeleton-hi: #3f4c63;
+  --skeleton: #18241f;
+  --skeleton-hi: #24322c;
 
   --offline-bg: #3a2f14;
-  --offline-text: #fbbf24;
+  --offline-text: #ffd166;
   --offline-border: #514014;
 
-  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 1px 3px rgba(0,0,0,.5);
+  --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 1px 3px rgba(0, 0, 0, .4);
 }
 
-/* ---------- dark theme (OS default mode) ----------
-   Fires only when the stored mode is "default" (follow the system) AND the
-   OS asks for dark. data-theme="light"/"dark" win because they are the
-   explicit selectors above. */
+/* ---------- forest dark (OS default mode) ---------- */
 @media (prefers-color-scheme: dark) {
   html[data-theme="default"] {
-    --bg: #0f172a;
-    --text: #e5e7eb;
-    --muted: #94a3b8;
-    --card: #1e293b;
-    --border: #334155;
-    --accent: #60a5fa;
+    --bg: #0d1512;
+    --panel: #131d19;
+    --panel2: #18241f;
+    --line: #24322c;
+    --text: #e8f0ec;
+    --muted: #8fa39b;
+    --dim: #74877e;
+    --accent: #35c28f;
+    --accent2: #ffd166;
+    --entree: #ff7a6b;
+    --chip: #1e2b25;
+    --chip-active: #2c443a;
 
-    --c-amber: #fbbf24;
-    --c-green: #34d399;
-    --c-red: #f87171;
-    --c-slate: var(--muted);
-
-    --skeleton: #334155;
-    --skeleton-hi: #3f4c63;
+    --skeleton: #18241f;
+    --skeleton-hi: #24322c;
 
     --offline-bg: #3a2f14;
-    --offline-text: #fbbf24;
+    --offline-text: #ffd166;
     --offline-border: #514014;
 
-    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 1px 3px rgba(0,0,0,.5);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 1px 3px rgba(0, 0, 0, .4);
   }
 }
 
@@ -97,13 +128,25 @@ html[data-theme="dark"] {
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
-  font-family: var(--font);
+  font-family: var(--font-sans);
   font-size: 16px;
-  line-height: 1.4;
+  line-height: 1.45;
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
 }
+/* Subtle grain over the flat surfaces (pointer-events: none, ~2% opacity). */
+body::after {
+  content: "";
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: .02;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 192px 192px;
+}
+html[data-theme="light"] body::after,
+html:not([data-theme="dark"]) body::after { opacity: .015; }
 button { font: inherit; cursor: pointer; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 [hidden] { display: none !important; }
@@ -116,30 +159,45 @@ button { font: inherit; cursor: pointer; }
   }
 }
 
-/* ================= top bar (h-16 = 64px) ================= */
+/* ================= top bar (glassy, h-16 = 64px) ================= */
 .topbar {
   position: sticky;
   top: 0;
   z-index: 40;
-  height: 64px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+  padding-top: var(--safe-top);
 }
 .topbar-inner {
   max-width: 720px;
   margin: 0 auto;
-  height: 100%;
+  min-height: 64px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 12px;
+  padding: 8px 12px;
 }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand-mark {
+  flex: 0 0 auto;
+  font-size: 1.3rem;
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  color: var(--accent);
+}
+.brand-mark svg { width: 21px; height: 21px; display: block; }
 .app-title {
   margin: 0;
-  font-size: 18px;
+  font-family: var(--font-display);
+  font-size: 1.1rem;
   font-weight: 700;
-  letter-spacing: -0.2px;
+  letter-spacing: -0.3px;
   color: var(--text);
   white-space: nowrap;
 }
@@ -150,16 +208,16 @@ button { font: inherit; cursor: pointer; }
   gap: 6px;
   height: 40px;
   padding: 0 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--card);
+  background: var(--panel);
   color: var(--text);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
   transition: background .15s ease, border-color .15s ease, color .15s ease;
 }
-.topbar-btn:active { transform: translateY(1px); }
+.topbar-btn:active { transform: translateY(1px); background: var(--panel2); }
 .topbar-btn-icon {
   display: grid;
   place-items: center;
@@ -175,16 +233,18 @@ button { font: inherit; cursor: pointer; }
 
 /* ================= main content ================= */
 .app-view {
+  position: relative;
+  z-index: 1;
   max-width: 720px;
   margin: 0 auto;
-  padding: 12px 12px 112px;
+  padding: 14px 12px calc(24px + var(--safe-bottom));
 }
 
 /* ================= card ================= */
 .card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
   padding: 14px 16px;
   box-shadow: var(--shadow);
 }
@@ -210,6 +270,7 @@ button { font: inherit; cursor: pointer; }
 .badge-green { color: var(--c-green); background: color-mix(in srgb, var(--c-green) 14%, transparent); border-color: color-mix(in srgb, var(--c-green) 30%, transparent); }
 .badge-red   { color: var(--c-red);   background: color-mix(in srgb, var(--c-red) 14%, transparent);   border-color: color-mix(in srgb, var(--c-red) 30%, transparent); }
 .badge-slate { color: var(--c-slate); background: color-mix(in srgb, var(--c-slate) 14%, transparent); border-color: color-mix(in srgb, var(--c-slate) 30%, transparent); }
+html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-amber { color: #33443c; }
 
 /* ================= chip (filter) ================= */
 .chip {
@@ -217,9 +278,9 @@ button { font: inherit; cursor: pointer; }
   align-items: center;
   gap: 6px;
   padding: 8px 14px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--chip);
   color: var(--muted);
   font-size: 13px;
   font-weight: 500;
@@ -248,12 +309,12 @@ button { font: inherit; cursor: pointer; }
   color: var(--muted);
   text-align: left;
   padding: 6px 8px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
 .tbl td {
   padding: 8px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
   vertical-align: middle;
   overflow-wrap: anywhere;
 }
@@ -265,15 +326,18 @@ button { font: inherit; cursor: pointer; }
 .tbl tbody tr:active { background: color-mix(in srgb, var(--text) 5%, transparent); }
 /* numeric columns align right (tabular). */
 .tbl .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-/* Pricing category group header row (colspan cell). */
+/* Pricing category group header row — accent-rail sub-header (house-style cat-head). */
 .tbl .group-row { cursor: default; }
 .tbl .group-row td {
+  border-left: 3px solid var(--accent);
+  padding-left: 10px;
   padding-top: 14px;
-  font-size: 11px;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
+  letter-spacing: 0.06em;
+  color: var(--accent);
 }
 .tbl .group-row:first-child td { padding-top: 8px; }
 
@@ -299,35 +363,44 @@ button { font: inherit; cursor: pointer; }
 .empty-state .title { font-size: 14px; font-weight: 600; color: var(--text); }
 .empty-state .hint { font-size: 12px; }
 
-/* ================= home dashboard (Task 10) =================
-   Only the layout/typography rules that can't be composed from the existing
-   card/badge/tbl/empty-state/btn/skeleton classes. Everything else reuses
-   them. */
+/* ================= home dashboard =================
+   Accent-rail section header is the signature house-style treatment. */
 .head-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
-.dash-title { font-size: 18px; font-weight: 700; letter-spacing: -0.2px; overflow-wrap: anywhere; }
+.dash-title { font-family: var(--font-display); font-size: 18px; font-weight: 700; letter-spacing: -0.3px; overflow-wrap: anywhere; }
 .dash-sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
-.dash-count { font-size: 34px; font-weight: 700; letter-spacing: -0.5px; font-variant-numeric: tabular-nums; line-height: 1; }
+.dash-count { font-family: var(--font-display); font-size: 34px; font-weight: 700; letter-spacing: -0.5px; font-variant-numeric: tabular-nums; line-height: 1; color: var(--text); }
 .badge-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
-.section-head { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 10px; }
+.section-head {
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin: 0 0 10px;
+  padding-left: 10px;
+  border-left: 3px solid var(--accent);
+}
 /* the "Show all (N)" expander — a subtle full-width text button */
 .expander {
   width: 100%;
   margin-top: 10px;
   padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: none;
+  border-top: 1px dashed var(--line);
+  border-radius: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--accent);
   font-size: 12px;
   font-weight: 600;
-  transition: background .15s ease;
+  transition: color .15s ease, background .15s ease;
 }
-.expander:active { transform: translateY(1px); background: color-mix(in srgb, var(--text) 5%, transparent); }
+.expander:active { transform: translateY(1px); color: var(--text); }
 .muted-line { color: var(--muted); font-size: 12px; margin-top: 10px; }
 /* dashboard specifics: label under the big count, and spacing when two
    tables stack inside one card (the payments card). */
@@ -350,6 +423,7 @@ button { font: inherit; cursor: pointer; }
   font-weight: 600;
   transition: filter .15s ease, transform .05s ease, opacity .15s ease;
 }
+html[data-theme="light"] .btn, html:not([data-theme="dark"]) .btn { color: #ffffff; }
 .btn:active { transform: translateY(1px); }
 .btn:hover { filter: brightness(1.06); }
 .btn[disabled], .btn.disabled {
@@ -377,31 +451,29 @@ button { font: inherit; cursor: pointer; }
 }
 @keyframes shimmer { to { transform: translateX(100%); } }
 
-/* ================= toast (reused name/pattern from house-style #toast/.show) ================= */
+/* ================= toast ================= */
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(16px + var(--safe-bottom));
+  bottom: calc(20px + var(--safe-bottom));
   transform: translateX(-50%) translateY(8px);
   z-index: 500;
   max-width: calc(100% - 24px);
   padding: 12px 16px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--card);
+  background: var(--panel2);
   color: var(--text);
   font-size: 13px;
   font-weight: 500;
-  box-shadow: 0 12px 30px rgba(0,0,0,.25);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .35);
   opacity: 0;
   pointer-events: none;
   transition: opacity .2s ease, transform .2s ease;
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-/* ================= bottom sheet (attendee detail) =================
-   Renamed from house-style .modal/.modal-card → .bottom-sheet/.sheet-panel;
-   the slideup keyframe name is reused. */
+/* ================= bottom sheet (attendee detail) ================= */
 .bottom-sheet {
   position: fixed;
   inset: 0;
@@ -410,47 +482,48 @@ button { font: inherit; cursor: pointer; }
   place-items: end center;
 }
 .bottom-sheet[hidden] { display: none; }
-.sheet-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.55); }
+.sheet-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, .55); }
 .sheet-panel {
   position: relative;
   width: 100%;
   max-width: 720px;
-  max-height: 75vh;
+  max-height: 78vh;
   overflow-y: auto;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  background: var(--panel2);
+  border: 1px solid var(--line);
   border-bottom: none;
-  border-radius: 16px 16px 0 0;
-  padding: 8px 16px calc(16px + var(--safe-bottom));
-  animation: slideup .24s ease-out;
+  border-radius: 18px 18px 0 0;
+  padding: 8px 16px calc(20px + var(--safe-bottom));
+  animation: slideup .22s ease-out;
 }
 .sheet-handle {
   display: block;
   width: 40px;
   height: 4px;
   border-radius: 999px;
-  background: var(--border);
+  background: var(--line);
   margin: 6px auto 12px;
 }
-.sheet-panel h2 { margin: 0 0 4px; font-size: 18px; font-weight: 700; letter-spacing: -0.2px; }
+.sheet-panel h2 { margin: 0 0 4px; font-family: var(--font-display); font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
 .sheet-meta { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
 @keyframes slideup {
-  from { transform: translateY(32px); opacity: .4; }
+  from { transform: translateY(28px); opacity: .4; }
   to { transform: none; opacity: 1; }
 }
 
 /* ================= offline banner ================= */
 .offline-banner {
   width: 100%;
-  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--offline-bg);
   color: var(--offline-text);
   border-bottom: 1px solid var(--offline-border);
-  font-size: 13px;
+  font-size: 0.78rem;
   font-weight: 500;
+  padding: 5px 12px;
+  text-align: center;
 }
 
 /* ================= touch targets (coarse pointers) ================= */
@@ -463,20 +536,19 @@ button { font: inherit; cursor: pointer; }
   .tbl tbody tr::after { content: ""; position: absolute; inset: 0 -4px; }
 }
 
-/* ================= attendees view (Task 11) =================
-   Only the layout/typography rules that can't be composed from the
-   existing card/badge/tbl/empty-state/btn/skeleton/bottom-sheet classes. */
+/* ================= attendees view ================= */
 .search-input {
   width: 100%;
   height: 40px;
   padding: 0 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--bg);
+  background: var(--panel);
   color: var(--text);
   font-size: 14px;
 }
-.search-input::placeholder { color: var(--muted); }
+.search-input:focus { outline: none; border-color: var(--accent); }
+.search-input::placeholder { color: var(--dim); }
 .att-count-line { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
 .tbl .muted-cell { color: var(--muted); overflow-wrap: anywhere; }
 .tbl .mono-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -487,15 +559,18 @@ button { font: inherit; cursor: pointer; }
   place-items: center;
   width: 32px;
   height: 32px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
   color: var(--muted);
   flex: 0 0 auto;
 }
 .sheet-close svg { width: 16px; height: 16px; }
-.sheet-sec { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 16px 0 8px; }
+.sheet-sec { font-family: var(--font-display); font-size: 0.74rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 16px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--line); }
 /* answer key/value list (the sheet's Answers block) */
 .kv-list { margin: 0; display: grid; gap: 6px; }
 .kv-list dt { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .kv-list dd { margin: 0 0 4px; font-size: 14px; overflow-wrap: anywhere; }
+
+/* ================= fallback loading note (theme.js) ================= */
+.loading-note { color: var(--muted); font-size: 14px; padding: 40px 0; text-align: center; }

@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Cvent Data</title>
 <meta name="description" content="Cvent event data — registrations, pricing, payments, attendees, check-in.">
-<meta name="color-scheme" content="light">
-<meta name="theme-color" content="#ffffff">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0d1512">
 <!-- Pre-paint theme bootstrap. Loaded WITHOUT defer so it runs before the
      stylesheet link and before first paint. It is an external file because
      the server's CSP (default-src 'self') blocks inline <script> elements —
@@ -18,7 +18,10 @@
 <body>
 <header class="topbar">
   <div class="topbar-inner">
-    <h1 class="app-title">Cvent Data</h1>
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
+      <h1 class="app-title">Cvent Data</h1>
+    </div>
     <div class="topbar-actions">
       <button id="theme-toggle" class="topbar-btn" type="button"
               aria-label="Change theme" title="Change theme">

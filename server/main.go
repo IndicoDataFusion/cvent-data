@@ -83,7 +83,7 @@ func staticCacheControl(p string) string {
 		}
 		return "no-cache"
 	}
-	if strings.HasPrefix(p, "icons/") {
+	if strings.HasPrefix(p, "icons/") || strings.HasPrefix(p, "fonts/") {
 		return "public, max-age=31536000, immutable"
 	}
 	return "no-cache"
@@ -195,7 +195,7 @@ func security(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy",
-			"default-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:")
+			"default-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'")
 		next.ServeHTTP(w, r)
 	})
 }
