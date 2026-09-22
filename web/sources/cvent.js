@@ -430,11 +430,12 @@ function registrationsCard(bundle) {
   );
 }
 
-// Pricing card: fee items joined to their product. feeItems[i].product is
-// {id, type, name}; type "AdmissionItem" links product.id into
-// admissionItems (joined on id, the admission's code shown); other types
-// (QuantityItem: tours, extra tickets) carry no admission — their product
-// name is shown instead.
+// Pricing card: fee items grouped by category. A category is the fee
+// item's product: "AdmissionItem" → the admission's code (joined on
+// product.id into admissionItems), any other product type (QuantityItem:
+// tours, extra tickets) → the product's name. Group header rows use
+// colspan; no grand-total row — the fees are different price points, not
+// line items of one order, so a "total" would be meaningless.
 function pricingCard(bundle, currency) {
   const fees = Array.isArray(bundle.feeItems) ? bundle.feeItems : [];
   if (!fees.length) {
@@ -443,32 +444,37 @@ function pricingCard(bundle, currency) {
   const adms = Array.isArray(bundle.admissionItems) ? bundle.admissionItems : [];
   const admCode = {};
   adms.forEach((a) => { if (a.id) admCode[a.id] = a.code || a.name || ""; });
-  let total = 0;
-  const rows = fees
-    .map((f) => {
-      const amt = Number(f.amount) || 0;
-      total += amt;
-      const p = f.product || {};
-      const item =
-        p.type === "AdmissionItem" && admCode[p.id]
-          ? admCode[p.id]
-          : p.name || "";
+  const groups = [];
+  const groupIdx = {};
+  fees.forEach((f) => {
+    const p = f.product || {};
+    const cat =
+      p.type === "AdmissionItem" && admCode[p.id]
+        ? admCode[p.id]
+        : p.name || "Other";
+    if (!(cat in groupIdx)) {
+      groupIdx[cat] = groups.length;
+      groups.push({ cat, items: [] });
+    }
+    groups[groupIdx[cat]].items.push(f);
+  });
+  let body = "";
+  groups.forEach((g) => {
+    body += '<tr class="group-row"><td colspan="2">' + esc(g.cat) + "</td></tr>";
+    g.items.forEach((f) => {
       const earlyBird = Array.isArray(f.earlyBirdPricing) && f.earlyBirdPricing.length > 0;
-      return (
+      body +=
         "<tr><td>" + esc(f.name) +
         (earlyBird ? ' <span class="badge badge-amber">Early bird</span>' : "") +
-        "</td><td>" + esc(item) + "</td>" +
-        '<td class="num">' + esc(money(amt, f.currency || currency)) + "</td></tr>"
-      );
-    })
-    .join("");
+        "</td>" +
+        '<td class="num">' + esc(money(f.amount, f.currency || currency)) + "</td></tr>";
+    });
+  });
   return (
     card(sectionTitle("Pricing") +
-    '<table class="tbl"><thead><tr><th>Name</th><th>Item</th>' +
+    '<table class="tbl"><thead><tr><th>Name</th>' +
     '<th class="num">Amount</th></tr></thead><tbody>' +
-    rows +
-    '<tr><td><strong>Total</strong></td><td></td><td class="num"><strong>' +
-    esc(money(total, currency)) + "</strong></td></tr>" +
+    body +
     "</tbody></table>")
   );
 }

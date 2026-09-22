@@ -265,6 +265,17 @@ button { font: inherit; cursor: pointer; }
 .tbl tbody tr:active { background: color-mix(in srgb, var(--text) 5%, transparent); }
 /* numeric columns align right (tabular). */
 .tbl .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Pricing category group header row (colspan cell). */
+.tbl .group-row { cursor: default; }
+.tbl .group-row td {
+  padding-top: 14px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.tbl .group-row:first-child td { padding-top: 8px; }
 
 /* ================= empty state ================= */
 .empty-state {
