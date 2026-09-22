@@ -11,7 +11,11 @@ tests/test_auth.sh        # OAuth2 token flow + JWT scope dump
 tests/test_events.sh      # /events listing + cursor pagination
 tests/test_contacts.sh    # /contacts listing + limit
 tests/test_attendees.sh   # /attendees + /attendees/filter + activities
+tests/probe_endpoints.sh  # live-probe all in-scope read endpoints
+tests/pull_event.sh <code-or-uuid> [dest]   # full pull of one event
 ```
+
+Endpoint-by-endpoint findings (totals, shapes, filter gotchas): `ENDPOINTS.md`.
 
 Requires `.env` in the repo root with `CVENT_CLIENT_ID` / `CVENT_CLIENT_SECRET`
 (gitignored). Override the base URL with `CVENT_API_BASE` (EU:
