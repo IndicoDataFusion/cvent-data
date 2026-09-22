@@ -93,10 +93,18 @@ print(d["access_token"])
 }
 
 # cvent_get <path> [extra query...] -> JSON body on stdout
+# Query args are URL-encoded (filter strings contain spaces and quotes).
 cvent_get() {
   local path="$1"; shift || true
   local url="$API_BASE$path"
-  if [ "$#" -gt 0 ]; then url="$url?$*"; fi
+  if [ "$#" -gt 0 ]; then
+    local q
+    q=$(python3 -c '
+import sys, urllib.parse
+print(urllib.parse.quote("&".join(sys.argv[1:]), safe="=&"))
+' "$@")
+    url="$url?$q"
+  fi
   curl -sf --max-time 60 "$url" \
     -H "Authorization: Bearer $(cvent_token)" \
     -H 'Accept: application/json'
