@@ -413,9 +413,27 @@ function regRow(t) {
 }
 
 // Registrations card: big dynamic attendee count + one table row per
-// registration type (name, code, capacity, Open/Full). Membership
-// types are many and repetitive, so they collapse into a single group
-// row (click to expand / collapse); all other types render directly.
+// registration type (name, code, capacity, Open/Full). Sodalities with many
+// similar types (Member, Student) collapse into tappable group rows (click to
+// expand / collapse, collapsed by default); everything else renders flat.
+const REG_GROUPS = [
+  { key: "member", label: "Member", test: (t) => /Member/i.test(t.name || "") },
+  { key: "student", label: "Student", test: (t) => /Student/i.test(t.name || "") },
+];
+
+function regGroupHtml(g, members) {
+  if (!members.length) return "";
+  const row =
+    '<tr class="group-row group-toggle" data-group-toggle="' + g.key + '" ' +
+    'role="button" tabindex="0" aria-expanded="false">' +
+    '<td colspan="4"><span class="group-chevron" aria-hidden="true">&#9656;</span>' +
+    esc(g.label) + ' <span class="badge badge-slate">' + esc(members.length) + "</span></td></tr>";
+  const body =
+    '<tbody data-group-body="' + g.key + '" hidden>' +
+    members.map(regRow).join("") + "</tbody>";
+  return { row, body };
+}
+
 function registrationsCard(bundle) {
   const counts = bundle.counts || {};
   const total = Number.isFinite(counts.attendees) ? counts.attendees : 0;
@@ -427,23 +445,21 @@ function registrationsCard(bundle) {
   if (!named.length) {
     return card(sectionTitle("Registrations") + countHtml + '<div class="empty-state"><div class="hint">No registration types</div></div>');
   }
-  const isMember = (t) => /Member/i.test(t.name || "");
-  const others = named.filter((t) => !isMember(t));
-  const member = named.filter(isMember);
-  const groupRow = member.length
-    ? '<tr class="group-row group-toggle" data-group-toggle="registrations" ' +
-      'role="button" tabindex="0" aria-expanded="false">' +
-      '<td colspan="4"><span class="group-chevron" aria-hidden="true">&#9656;</span>' +
-      "Member <span class=\"badge badge-slate\">" + esc(member.length) + "</span></td></tr>"
-    : "";
-  const groupBody = member.length
-    ? '<tbody data-group-body="registrations" hidden>' + member.map(regRow).join("") + "</tbody>"
-    : "";
+  const flat = named.slice();
+  const groups = [];
+  REG_GROUPS.forEach((g) => {
+    const members = flat.filter(g.test);
+    if (!members.length) return;
+    for (let i = flat.length - 1; i >= 0; i--) if (g.test(flat[i])) flat.splice(i, 1);
+    groups.push(regGroupHtml(g, members));
+  });
   return (
     card(sectionTitle("Registrations") + countHtml +
     '<table class="tbl"><thead><tr><th>Name</th><th>Code</th>' +
     '<th class="num">Capacity</th><th>Status</th></tr></thead><tbody>' +
-    others.map(regRow).join("") + groupRow + "</tbody>" + groupBody + "</table>")
+    flat.map(regRow).join("") +
+    groups.map((g) => g.row).join("") + "</tbody>" +
+    groups.map((g) => g.body).join("") + "</table>")
   );
 }
 
@@ -478,8 +494,9 @@ function primaryFeeForType(bundle) {
 
 // Pricing card: one row per registration type — its standard admission fee
 // and, when the fee carries an early-bird tier, the early-bird amount with
-// the register-by deadline. The blank placeholder type is skipped; a type
-// with no admission fee shows "—".
+// the register-by deadline. Member / Student types collapse into the same tappable
+// groups as the Registrations card (see REG_GROUPS); the rest render flat.
+// The blank placeholder type is skipped; a type with no fee shows "—".
 function pricingCard(bundle, currency) {
   const rts = Array.isArray(bundle.registrationTypes) ? bundle.registrationTypes : [];
   if (!rts.length || !(Array.isArray(bundle.feeItems) && bundle.feeItems.length)) {
@@ -489,10 +506,7 @@ function pricingCard(bundle, currency) {
   // State the currency once (fees all share the event currency); cells then
   // show bare numbers so three columns fit a phone.
   const cur = (bundle.event && bundle.event.currency) || currency || "";
-  let body = "";
-  rts.forEach((t) => {
-    const name = t.name || t.code;
-    if (!name) return; // skip the blank placeholder registration type
+  const rowFor = (t) => {
     const fee = primaryFee(t.id);
     const std = fee && Number.isFinite(Number(fee.amount))
       ? esc(money0(fee.amount))
@@ -510,19 +524,41 @@ function pricingCard(bundle, currency) {
     } else {
       ebCell = '<span class="muted-line">—</span>';
     }
-    body +=
-      "<tr><td>" + esc(name) + "</td>" +
+    return (
+      "<tr><td>" + esc(t.name || t.code) + "</td>" +
       '<td class="num">' + std + "</td>" +
-      '<td class="num">' + ebCell + "</td></tr>";
+      '<td class="num">' + ebCell + "</td></tr>"
+    );
+  };
+  const named = rts.filter((t) => t.name || t.code); // skip blank placeholder
+  const flat = named.slice();
+  const groups = [];
+  REG_GROUPS.forEach((g) => {
+    const members = flat.filter(g.test);
+    if (!members.length) return;
+    for (let i = flat.length - 1; i >= 0; i--) if (g.test(flat[i])) flat.splice(i, 1);
+    const key = "price-" + g.key;
+    groups.push({
+      row:
+        '<tr class="group-row group-toggle" data-group-toggle="' + key + '" ' +
+        'role="button" tabindex="0" aria-expanded="false">' +
+        '<td colspan="3"><span class="group-chevron" aria-hidden="true">&#9656;</span>' +
+        esc(g.label) + ' <span class="badge badge-slate">' + esc(members.length) + "</span></td></tr>",
+      body:
+        '<tbody data-group-body="' + key + '" hidden>' +
+        members.map(rowFor).join("") + "</tbody>",
+    });
   });
-  if (!body) {
+  if (!flat.length && !groups.length) {
     return card(sectionTitle("Pricing") + '<div class="empty-state"><div class="hint">No pricing</div></div>');
   }
   return (
     card(sectionTitle("Pricing", cur ? ' <span class="badge badge-slate">' + esc(cur) + "</span>" : "") +
     '<table class="tbl"><thead><tr><th>Registration type</th>' +
     '<th class="num">Standard</th><th class="num">Early bird</th></tr></thead><tbody>' +
-    body +
+    flat.map(rowFor).join("") +
+    groups.map((g) => g.row).join("") + "</tbody>" +
+    groups.map((g) => g.body).join("") +
     "</tbody></table>")
   );
 }
