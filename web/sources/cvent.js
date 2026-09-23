@@ -396,40 +396,54 @@ function headerCard(bundle) {
   );
 }
 
+// One registration-type row (name, code, capacity, Open/Full).
+function regRow(t) {
+  const cap = t.capacity || {};
+  const unlimited = cap.total == null || cap.total < 0;
+  const full = !unlimited && cap.total - (cap.consumed || 0) <= 0;
+  return (
+    "<tr><td>" + esc(t.name) + "</td><td>" + esc(t.code) + "</td>" +
+    '<td class="num">' + (unlimited ? "Unlimited" : esc(cap.total)) + "</td>" +
+    "<td>" +
+    (full
+      ? '<span class="badge badge-red">Full</span>'
+      : '<span class="badge badge-green">Open</span>') +
+    "</td></tr>"
+  );
+}
+
 // Registrations card: big dynamic attendee count + one table row per
-// registration type (name, code, capacity, Open/Full).
+// registration type (name, code, capacity, Open/Full). Membership
+// types are many and repetitive, so they collapse into a single group
+// row (click to expand / collapse); all other types render directly.
 function registrationsCard(bundle) {
   const counts = bundle.counts || {};
   const total = Number.isFinite(counts.attendees) ? counts.attendees : 0;
   const types = Array.isArray(bundle.registrationTypes) ? bundle.registrationTypes : [];
+  const named = types.filter((t) => t.code || t.name); // skip blank placeholder
   const countHtml =
     '<div class="dash-count">' + esc(total) +
     '<div class="dash-sub">attendees</div></div>';
-  if (!types.length) {
+  if (!named.length) {
     return card(sectionTitle("Registrations") + countHtml + '<div class="empty-state"><div class="hint">No registration types</div></div>');
   }
-  const rows = types
-    .filter((t) => t.code || t.name) // skip Cvent's blank placeholder type
-    .map((t) => {
-      const cap = t.capacity || {};
-      const unlimited = cap.total == null || cap.total < 0;
-      const full = !unlimited && cap.total - (cap.consumed || 0) <= 0;
-      return (
-        "<tr><td>" + esc(t.name) + "</td><td>" + esc(t.code) + "</td>" +
-        '<td class="num">' + (unlimited ? "Unlimited" : esc(cap.total)) + "</td>" +
-        "<td>" +
-        (full
-          ? '<span class="badge badge-red">Full</span>'
-          : '<span class="badge badge-green">Open</span>') +
-        "</td></tr>"
-      );
-    })
-    .join("");
+  const isMember = (t) => /Member/i.test(t.name || "");
+  const others = named.filter((t) => !isMember(t));
+  const member = named.filter(isMember);
+  const groupRow = member.length
+    ? '<tr class="group-row group-toggle" data-group-toggle="registrations" ' +
+      'role="button" tabindex="0" aria-expanded="false">' +
+      '<td colspan="4"><span class="group-chevron" aria-hidden="true">&#9656;</span>' +
+      "Member <span class=\"badge badge-slate\">" + esc(member.length) + "</span></td></tr>"
+    : "";
+  const groupBody = member.length
+    ? '<tbody data-group-body="registrations" hidden>' + member.map(regRow).join("") + "</tbody>"
+    : "";
   return (
     card(sectionTitle("Registrations") + countHtml +
     '<table class="tbl"><thead><tr><th>Name</th><th>Code</th>' +
     '<th class="num">Capacity</th><th>Status</th></tr></thead><tbody>' +
-    rows + "</tbody></table>")
+    others.map(regRow).join("") + groupRow + "</tbody>" + groupBody + "</table>")
   );
 }
 
@@ -623,8 +637,9 @@ function dashboardHtml(bundle, payments) {
 }
 
 // Wires the rendered dashboard: the "Show all (N)" expanders reveal their
-// hidden rows in place. (Refresh is a topbar control — app.js — so there is
-// nothing view-local to wire for repulls.)
+// hidden rows in place, and group-toggle rows (e.g. the collapsible Member
+// block in Registrations) expand / collapse their tbody. (Refresh is a
+// topbar control — app.js — so there is nothing view-local for repulls.)
 function wireDashboard(mount) {
   mount.querySelectorAll("[data-expand]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -632,6 +647,23 @@ function wireDashboard(mount) {
       const more = scope.querySelector("[data-more]");
       if (more) more.removeAttribute("hidden");
       btn.remove();
+    });
+  });
+  mount.querySelectorAll("[data-group-toggle]").forEach((row) => {
+    const toggle = () => {
+      const scope = row.closest(".card") || mount;
+      const body = scope.querySelector(
+        '[data-group-body="' + row.getAttribute("data-group-toggle") + '"]'
+      );
+      if (!body) return;
+      const open = body.hasAttribute("hidden");
+      if (open) body.removeAttribute("hidden");
+      else body.setAttribute("hidden", "");
+      row.setAttribute("aria-expanded", String(open));
+    };
+    row.addEventListener("click", toggle);
+    row.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
     });
   });
 }

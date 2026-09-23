@@ -343,6 +343,19 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
   color: var(--accent);
 }
 .tbl .group-row:first-child td { padding-top: 8px; }
+/* Collapsible group (registrations Member block): the header row is a tap
+   target; the chevron points right when collapsed, down when open. */
+.tbl .group-toggle { cursor: pointer; }
+.tbl .group-toggle td {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.tbl .group-toggle .group-chevron {
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 0.6em;
+  transition: transform 0.15s ease;
+}
+.tbl .group-toggle[aria-expanded="true"] .group-chevron { transform: rotate(90deg); }
 
 /* ================= empty state ================= */
 .empty-state {
