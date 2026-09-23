@@ -329,33 +329,15 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
 /* Early-bird cell: amount on top, "by <date>" deadline stacked beneath it. */
 .tbl .eb-amount { font-variant-numeric: tabular-nums; }
 .tbl .eb-amount + .muted-line { margin-top: 2px; line-height: 1.2; }
-/* Pricing category group header row — accent-rail sub-header (house-style cat-head). */
-.tbl .group-row { cursor: default; }
-.tbl .group-row td {
-  border-left: 3px solid var(--accent);
-  padding-left: 10px;
-  padding-top: 14px;
-  font-family: var(--font-display);
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--accent);
+/* Sortable column headers: tap to sort (asc → desc → original). The
+   indicator arrow sits after the label, dim until active. */
+.tbl th[data-sort] { user-select: none; -webkit-user-select: none; }
+.tbl .sort-ind {
+  margin-left: 4px;
+  font-size: 0.8em;
+  color: color-mix(in srgb, var(--muted) 55%, transparent);
 }
-.tbl .group-row:first-child td { padding-top: 8px; }
-/* Collapsible group (registrations Member block): the header row is a tap
-   target; the chevron points right when collapsed, down when open. */
-.tbl .group-toggle { cursor: pointer; }
-.tbl .group-toggle td {
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
-}
-.tbl .group-toggle .group-chevron {
-  display: inline-block;
-  margin-right: 6px;
-  font-size: 0.6em;
-  transition: transform 0.15s ease;
-}
-.tbl .group-toggle[aria-expanded="true"] .group-chevron { transform: rotate(90deg); }
+.tbl th[data-sort][aria-sort] .sort-ind { color: var(--accent); }
 
 /* ================= empty state ================= */
 .empty-state {

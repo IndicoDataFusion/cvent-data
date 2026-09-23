@@ -396,15 +396,20 @@ function headerCard(bundle) {
   );
 }
 
-// One registration-type row (name, code, capacity, Open/Full).
+// One registration-type row (name, code, capacity, Open/Full). Every cell
+// carries a data-val sort key: strings as text, capacity as a number
+// (unlimited → a value larger than any finite total), status as 0/1.
 function regRow(t) {
   const cap = t.capacity || {};
   const unlimited = cap.total == null || cap.total < 0;
   const full = !unlimited && cap.total - (cap.consumed || 0) <= 0;
   return (
-    "<tr><td>" + esc(t.name) + "</td><td>" + esc(t.code) + "</td>" +
-    '<td class="num">' + (unlimited ? "Unlimited" : esc(cap.total)) + "</td>" +
-    "<td>" +
+    "<tr>" +
+    '<td data-val="' + esc(t.name || "") + '">' + esc(t.name) + "</td>" +
+    '<td data-val="' + esc(t.code || "") + '">' + esc(t.code) + "</td>" +
+    '<td class="num" data-val="' + (unlimited ? 999999999 : cap.total) + '">' +
+    (unlimited ? "Unlimited" : esc(cap.total)) + "</td>" +
+    '<td data-val="' + (full ? 1 : 0) + '">' +
     (full
       ? '<span class="badge badge-red">Full</span>'
       : '<span class="badge badge-green">Open</span>') +
@@ -412,28 +417,18 @@ function regRow(t) {
   );
 }
 
-// Registrations card: big dynamic attendee count + one table row per
-// registration type (name, code, capacity, Open/Full). Sodalities with many
-// similar types (Member, Student) collapse into tappable group rows (click to
-// expand / collapse, collapsed by default); everything else renders flat.
-const REG_GROUPS = [
-  { key: "member", label: "Member", test: (t) => /Member/i.test(t.name || "") },
-  { key: "student", label: "Student", test: (t) => /Student/i.test(t.name || "") },
-];
-
-function regGroupHtml(g, members) {
-  if (!members.length) return "";
-  const row =
-    '<tr class="group-row group-toggle" data-group-toggle="' + g.key + '" ' +
-    'role="button" tabindex="0" aria-expanded="false">' +
-    '<td colspan="4"><span class="group-chevron" aria-hidden="true">&#9656;</span>' +
-    esc(g.label) + ' <span class="badge badge-slate">' + esc(members.length) + "</span></td></tr>";
-  const body =
-    '<tbody data-group-body="' + g.key + '" hidden>' +
-    members.map(regRow).join("") + "</tbody>";
-  return { row, body };
+// Sortable column header. type: "str" (locale compare) or "num".
+function sortableTh(label, numeric) {
+  return (
+    '<th data-sort' + (numeric ? ' class="num"' : "") +
+    ' data-type="' + (numeric ? "num" : "str") + '" tabindex="0">' +
+    label + '<span class="sort-ind" aria-hidden="true">&#8597;</span></th>'
+  );
 }
 
+// Registrations card: big dynamic attendee count + one table row per
+// registration type (name, code, capacity, Open/Full). Columns sort on
+// header tap (asc → desc → original order).
 function registrationsCard(bundle) {
   const counts = bundle.counts || {};
   const total = Number.isFinite(counts.attendees) ? counts.attendees : 0;
@@ -445,21 +440,13 @@ function registrationsCard(bundle) {
   if (!named.length) {
     return card(sectionTitle("Registrations") + countHtml + '<div class="empty-state"><div class="hint">No registration types</div></div>');
   }
-  const flat = named.slice();
-  const groups = [];
-  REG_GROUPS.forEach((g) => {
-    const members = flat.filter(g.test);
-    if (!members.length) return;
-    for (let i = flat.length - 1; i >= 0; i--) if (g.test(flat[i])) flat.splice(i, 1);
-    groups.push(regGroupHtml(g, members));
-  });
   return (
     card(sectionTitle("Registrations") + countHtml +
-    '<table class="tbl"><thead><tr><th>Name</th><th>Code</th>' +
-    '<th class="num">Capacity</th><th>Status</th></tr></thead><tbody>' +
-    flat.map(regRow).join("") +
-    groups.map((g) => g.row).join("") + "</tbody>" +
-    groups.map((g) => g.body).join("") + "</table>")
+    '<table class="tbl sortable"><thead><tr>' +
+    sortableTh("Name") + sortableTh("Code") +
+    sortableTh("Capacity", true) + sortableTh("Status") +
+    "</tr></thead><tbody>" +
+    named.map(regRow).join("") + "</tbody></table>")
   );
 }
 
@@ -494,9 +481,8 @@ function primaryFeeForType(bundle) {
 
 // Pricing card: one row per registration type — its standard admission fee
 // and, when the fee carries an early-bird tier, the early-bird amount with
-// the register-by deadline. Member / Student types collapse into the same tappable
-// groups as the Registrations card (see REG_GROUPS); the rest render flat.
-// The blank placeholder type is skipped; a type with no fee shows "—".
+// the register-by deadline. Columns sort on header tap. The blank
+// placeholder type is skipped; a type with no fee shows "—" (sorts last).
 function pricingCard(bundle, currency) {
   const rts = Array.isArray(bundle.registrationTypes) ? bundle.registrationTypes : [];
   if (!rts.length || !(Array.isArray(bundle.feeItems) && bundle.feeItems.length)) {
@@ -508,14 +494,14 @@ function pricingCard(bundle, currency) {
   const cur = (bundle.event && bundle.event.currency) || currency || "";
   const rowFor = (t) => {
     const fee = primaryFee(t.id);
-    const std = fee && Number.isFinite(Number(fee.amount))
-      ? esc(money0(fee.amount))
-      : '<span class="muted-line">—</span>';
+    const stdOk = !!(fee && Number.isFinite(Number(fee.amount)));
+    const std = stdOk ? esc(money0(fee.amount)) : '<span class="muted-line">—</span>';
     const eb = fee && Array.isArray(fee.earlyBirdPricing) && fee.earlyBirdPricing.length
       ? fee.earlyBirdPricing[0]
       : null;
+    const ebOk = !!(eb && Number.isFinite(Number(eb.amount)));
     let ebCell;
-    if (eb && Number.isFinite(Number(eb.amount))) {
+    if (ebOk) {
       ebCell =
         '<div class="eb-amount">' + esc(money0(eb.amount)) + "</div>" +
         (eb.registerByDate
@@ -525,40 +511,23 @@ function pricingCard(bundle, currency) {
       ebCell = '<span class="muted-line">—</span>';
     }
     return (
-      "<tr><td>" + esc(t.name || t.code) + "</td>" +
-      '<td class="num">' + std + "</td>" +
-      '<td class="num">' + ebCell + "</td></tr>"
+      "<tr>" +
+      '<td data-val="' + esc(t.name || t.code || "") + '">' + esc(t.name || t.code) + "</td>" +
+      '<td class="num" data-val="' + (stdOk ? fee.amount : -1) + '">' + std + "</td>" +
+      '<td class="num" data-val="' + (ebOk ? eb.amount : -1) + '">' + ebCell + "</td></tr>"
     );
   };
   const named = rts.filter((t) => t.name || t.code); // skip blank placeholder
-  const flat = named.slice();
-  const groups = [];
-  REG_GROUPS.forEach((g) => {
-    const members = flat.filter(g.test);
-    if (!members.length) return;
-    for (let i = flat.length - 1; i >= 0; i--) if (g.test(flat[i])) flat.splice(i, 1);
-    const key = "price-" + g.key;
-    groups.push({
-      row:
-        '<tr class="group-row group-toggle" data-group-toggle="' + key + '" ' +
-        'role="button" tabindex="0" aria-expanded="false">' +
-        '<td colspan="3"><span class="group-chevron" aria-hidden="true">&#9656;</span>' +
-        esc(g.label) + ' <span class="badge badge-slate">' + esc(members.length) + "</span></td></tr>",
-      body:
-        '<tbody data-group-body="' + key + '" hidden>' +
-        members.map(rowFor).join("") + "</tbody>",
-    });
-  });
-  if (!flat.length && !groups.length) {
+  if (!named.length) {
     return card(sectionTitle("Pricing") + '<div class="empty-state"><div class="hint">No pricing</div></div>');
   }
   return (
     card(sectionTitle("Pricing", cur ? ' <span class="badge badge-slate">' + esc(cur) + "</span>" : "") +
-    '<table class="tbl"><thead><tr><th>Registration type</th>' +
-    '<th class="num">Standard</th><th class="num">Early bird</th></tr></thead><tbody>' +
-    flat.map(rowFor).join("") +
-    groups.map((g) => g.row).join("") + "</tbody>" +
-    groups.map((g) => g.body).join("") +
+    '<table class="tbl sortable"><thead><tr>' +
+    sortableTh("Registration type") +
+    sortableTh("Standard", true) + sortableTh("Early bird", true) +
+    "</tr></thead><tbody>" +
+    named.map(rowFor).join("") +
     "</tbody></table>")
   );
 }
@@ -673,8 +642,8 @@ function dashboardHtml(bundle, payments) {
 }
 
 // Wires the rendered dashboard: the "Show all (N)" expanders reveal their
-// hidden rows in place, and group-toggle rows (e.g. the collapsible Member
-// block in Registrations) expand / collapse their tbody. (Refresh is a
+// hidden rows in place, and sortable tables (Registrations, Pricing) sort
+// their rows on header tap — asc → desc → original order. (Refresh is a
 // topbar control — app.js — so there is nothing view-local for repulls.)
 function wireDashboard(mount) {
   mount.querySelectorAll("[data-expand]").forEach((btn) => {
@@ -685,21 +654,60 @@ function wireDashboard(mount) {
       btn.remove();
     });
   });
-  mount.querySelectorAll("[data-group-toggle]").forEach((row) => {
-    const toggle = () => {
-      const scope = row.closest(".card") || mount;
-      const body = scope.querySelector(
-        '[data-group-body="' + row.getAttribute("data-group-toggle") + '"]'
-      );
-      if (!body) return;
-      const open = body.hasAttribute("hidden");
-      if (open) body.removeAttribute("hidden");
-      else body.setAttribute("hidden", "");
-      row.setAttribute("aria-expanded", String(open));
+  mount.querySelectorAll(".tbl.sortable").forEach((tbl) => {
+    const tbody = tbl.querySelector("tbody");
+    if (!tbody) return;
+    const rows = Array.from(tbody.querySelectorAll("tr"));
+    const original = rows.slice(); // untouched order (phase 3 resets to this)
+    const state = { col: -1, dir: 0 };
+    const headers = Array.from(tbl.querySelectorAll("th[data-sort]"));
+    const setIndicators = () => {
+      headers.forEach((th) => {
+        const i = headers.indexOf(th);
+        const ind = th.querySelector(".sort-ind");
+        if (!ind) return;
+        if (i !== state.col || state.dir === 0) {
+          ind.innerHTML = "&#8597;"; // ⇇ neutral
+          th.removeAttribute("aria-sort");
+        } else {
+          ind.innerHTML = state.dir === 1 ? "&#9650;" : "&#9660;"; // ▲ / ▼
+          th.setAttribute("aria-sort", state.dir === 1 ? "ascending" : "descending");
+        }
+      });
     };
-    row.addEventListener("click", toggle);
-    row.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+    const apply = () => {
+      const col = state.col;
+      const dir = state.dir;
+      if (col < 0 || dir === 0) {
+        // Phase 3: back to the untouched Cvent order.
+        original.forEach((r) => tbody.appendChild(r));
+        setIndicators();
+        return;
+      }
+      const isNum = headers[col].getAttribute("data-type") === "num";
+      const cmp = (a, b) => {
+        const av = a.children[col] ? a.children[col].getAttribute("data-val") : "";
+        const bv = b.children[col] ? b.children[col].getAttribute("data-val") : "";
+        if (isNum) return (Number(av) || 0) - (Number(bv) || 0);
+        return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: "base" });
+      };
+      rows.sort((a, b) => cmp(a, b) * dir || (original.indexOf(a) - original.indexOf(b)));
+      rows.forEach((r) => tbody.appendChild(r));
+      setIndicators();
+    };
+    const toggle = (th) => {
+      const col = headers.indexOf(th);
+      if (state.col !== col) { state.col = col; state.dir = 1; }
+      else if (state.dir === 1) state.dir = -1;
+      else { state.col = -1; state.dir = 0; }
+      apply();
+    };
+    headers.forEach((th) => {
+      th.style.cursor = "pointer";
+      th.addEventListener("click", () => toggle(th));
+      th.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(th); }
+      });
     });
   });
 }
