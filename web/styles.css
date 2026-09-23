@@ -40,9 +40,9 @@
   --text: #1c2620;
   --muted: #5a6e65;
   --dim: #5f7168;
-  --accent: #0f7a58;
+  --accent: #0e7252;
   --accent2: #7d5805;
-  --entree: #c23f2d;
+  --entree: #b23929;
   --chip: #e9efeb;
   --chip-active: #d7e4dc;
 
@@ -322,7 +322,7 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
    inside the card on narrow screens (the table is width:100% of the card). */
 .tbl .badge { padding: 4px 8px; }
 .tbl tbody tr:last-child td { border-bottom: none; }
-.tbl tbody tr { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.tbl tbody tr[data-row] { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .tbl tbody tr:active { background: color-mix(in srgb, var(--text) 5%, transparent); }
 /* numeric columns align right (tabular). */
 .tbl .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -335,7 +335,7 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
 .tbl .sort-ind {
   margin-left: 4px;
   font-size: 0.8em;
-  color: color-mix(in srgb, var(--muted) 55%, transparent);
+  color: var(--dim); /* ≥4.5:1 both themes — the "sortable" cue must read */
 }
 .tbl th[data-sort][aria-sort] .sort-ind { color: var(--accent); }
 
@@ -526,12 +526,14 @@ html[data-theme="light"] .btn, html:not([data-theme="dark"]) .btn { color: #ffff
 
 /* ================= touch targets (coarse pointers) ================= */
 @media (pointer: coarse) {
-  .chip, .topbar-btn, .btn, .expander, .tbl tbody tr { position: relative; }
+  .chip, .topbar-btn, .btn, .expander, .tbl tbody tr, .tbl th[data-sort] { position: relative; }
   .chip::after { content: ""; position: absolute; inset: -6px; }
   .topbar-btn::after { content: ""; position: absolute; inset: -4px; }
   .btn::after { content: ""; position: absolute; inset: -4px; }
   .expander::after { content: ""; position: absolute; inset: -4px; }
   .tbl tbody tr::after { content: ""; position: absolute; inset: 0 -4px; }
+  /* sort headers are ~28px tall — extend the hit box to 44px */
+  .tbl th[data-sort]::after { content: ""; position: absolute; inset: -8px -2px; }
 }
 
 /* ================= attendees view ================= */

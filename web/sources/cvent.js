@@ -480,8 +480,10 @@ function primaryFeeForType(bundle) {
 }
 
 // Pricing card: one row per registration type — its standard admission fee
-// and, when the fee carries an early-bird tier, the early-bird amount with
-// the register-by deadline. Columns sort on header tap. The blank
+// and, when the fee carries an early-bird tier, the early-bird amount. When
+// every early-bird deadline is identical, one "Early bird through …" note
+// sits above the table and the cells carry amounts only; mixed deadlines
+// keep their per-row "by <date>". Columns sort on header tap. The blank
 // placeholder type is skipped; a type with no fee shows "—" (sorts last).
 function pricingCard(bundle, currency) {
   const rts = Array.isArray(bundle.registrationTypes) ? bundle.registrationTypes : [];
@@ -492,42 +494,49 @@ function pricingCard(bundle, currency) {
   // State the currency once (fees all share the event currency); cells then
   // show bare numbers so three columns fit a phone.
   const cur = (bundle.event && bundle.event.currency) || currency || "";
-  const rowFor = (t) => {
+  const named = rts.filter((t) => t.name || t.code); // skip blank placeholder
+  if (!named.length) {
+    return card(sectionTitle("Pricing") + '<div class="empty-state"><div class="hint">No pricing</div></div>');
+  }
+  // Resolve each type's fee/early-bird once; detect a uniform deadline.
+  const data = named.map((t) => {
     const fee = primaryFee(t.id);
     const stdOk = !!(fee && Number.isFinite(Number(fee.amount)));
-    const std = stdOk ? esc(money0(fee.amount)) : '<span class="muted-line">—</span>';
     const eb = fee && Array.isArray(fee.earlyBirdPricing) && fee.earlyBirdPricing.length
       ? fee.earlyBirdPricing[0]
       : null;
     const ebOk = !!(eb && Number.isFinite(Number(eb.amount)));
-    let ebCell;
-    if (ebOk) {
-      ebCell =
-        '<div class="eb-amount">' + esc(money0(eb.amount)) + "</div>" +
-        (eb.registerByDate
+    return { t, fee, stdOk, eb, ebOk };
+  });
+  const dates = [...new Set(data.filter((d) => d.ebOk && d.eb.registerByDate).map((d) => d.eb.registerByDate))];
+  const uniformDate = dates.length === 1 ? dates[0] : null;
+  const body = data.map((d) => {
+    const { t, fee, stdOk, eb, ebOk } = d;
+    const std = stdOk ? esc(money0(fee.amount)) : '<span class="muted-line">—</span>';
+    const ebCell = ebOk
+      ? '<div class="eb-amount">' + esc(money0(eb.amount)) + "</div>" +
+        (!uniformDate && eb.registerByDate
           ? '<div class="muted-line">by ' + esc(fmtDateShort(eb.registerByDate)) + "</div>"
-          : "");
-    } else {
-      ebCell = '<span class="muted-line">—</span>';
-    }
+          : "")
+      : '<span class="muted-line">—</span>';
     return (
       "<tr>" +
       '<td data-val="' + esc(t.name || t.code || "") + '">' + esc(t.name || t.code) + "</td>" +
       '<td class="num" data-val="' + (stdOk ? fee.amount : -1) + '">' + std + "</td>" +
       '<td class="num" data-val="' + (ebOk ? eb.amount : -1) + '">' + ebCell + "</td></tr>"
     );
-  };
-  const named = rts.filter((t) => t.name || t.code); // skip blank placeholder
-  if (!named.length) {
-    return card(sectionTitle("Pricing") + '<div class="empty-state"><div class="hint">No pricing</div></div>');
-  }
+  }).join("");
+  const note = uniformDate
+    ? '<div class="muted-line">Early bird through ' + esc(fmtDate(uniformDate)) + "</div>"
+    : "";
   return (
     card(sectionTitle("Pricing", cur ? ' <span class="badge badge-slate">' + esc(cur) + "</span>" : "") +
+    note +
     '<table class="tbl sortable"><thead><tr>' +
     sortableTh("Registration type") +
     sortableTh("Standard", true) + sortableTh("Early bird", true) +
     "</tr></thead><tbody>" +
-    named.map(rowFor).join("") +
+    body +
     "</tbody></table>")
   );
 }
