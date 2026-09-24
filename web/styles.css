@@ -231,6 +231,60 @@ button { font: inherit; cursor: pointer; }
    shift across theme modes). */
 .topbar-btn-label { display: inline-block; min-width: 36px; text-align: left; }
 
+/* ================= topbar event selector =================
+   A compact dropdown that mirrors the route's event and jumps between
+   events. Styled to sit flush with the topbar buttons (same 40px height,
+   same panel/line tokens). The "Event" label is hidden on very narrow
+   screens where the dropdown itself is enough. */
+.event-select-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+}
+.event-select-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.event-select {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  max-width: 132px;
+  padding: 0 22px 0 2px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* a small chevron drawn with a gradient so no extra asset is needed */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a9a92' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  background-size: 14px 14px;
+}
+.event-select:focus { outline: none; }
+.event-select-wrap:focus-within { border-color: var(--accent); }
+.event-select option { color: #1a221e; background: #ffffff; }
+@media (max-width: 420px) {
+  .event-select-label { display: none; }
+  .event-select-wrap { padding: 0 2px; }
+  .event-select { max-width: 116px; }
+}
+
 /* ================= main content ================= */
 .app-view {
   position: relative;
@@ -250,6 +304,71 @@ button { font: inherit; cursor: pointer; }
 }
 /* 8px between stacked cards (reduced vertical gap, not 16px). */
 .card + .card { margin-top: 8px; }
+
+/* ================= events landing (multi-event index) =================
+   A responsive grid of event cards. Each card is a link to #/<code> and
+   carries the accent-rail header treatment (left accent bar) so the landing
+   reads as part of the same design system as the dashboard section heads. */
+.event-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+@media (min-width: 560px) {
+  .event-grid { grid-template-columns: 1fr 1fr; }
+}
+.event-card {
+  position: relative;
+  display: block;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 16px 14px 18px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  text-decoration: none; /* it's an <a> — don't underline the inner text */
+  transition: border-color .15s ease, transform .05s ease;
+}
+.event-card::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--accent);
+}
+.event-card:active { transform: translateY(1px); }
+.event-card:hover { border-color: var(--accent); }
+.event-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.event-card-title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--text);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.event-card-dates {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 4px;
+  text-decoration: none;
+}
+.event-card-meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 6px;
+  text-decoration: none;
+}
+.event-card-code {
+  margin-top: 10px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-decoration: none;
+}
 
 /* ================= badge ================= */
 .badge {
@@ -296,6 +415,18 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
 }
 
 /* ================= table ================= */
+/* Horizontal-scroll wrapper: dense tables (many columns, or nowrap cells
+   like emails / confirmation numbers / money) can exceed a 390px viewport.
+   The wrapper scrolls the table horizontally instead of letting it push the
+   page wider. min-width keeps the table at least card-width so short tables
+   still fill the card; long tables grow and scroll. */
+.tbl-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -2px; /* let the scrollbar tuck under the card padding */
+  padding: 0 2px;
+}
+.tbl-wrap .tbl { min-width: 100%; }
 .tbl {
   width: 100%;
   border-collapse: collapse;

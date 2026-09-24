@@ -1,16 +1,17 @@
 /* Cvent source module — views + data access.
  *
- * The data-access functions (getEvent, getPayments, searchAttendees,
- * refresh) are the ONLY place in this file that talks to the network.
- * The views (home, attendees) are thin renderers on top of them; Task 10
- * replaced the home rendering in place (the attendees placeholder lands in
- * Task 11) and they call the same data-access functions.
+ * The data-access functions (getEvents, getEvent, getPayments,
+ * searchAttendees, refresh) are the ONLY place in this file that talks to
+ * the network. The views (events, home, attendees) are thin renderers on
+ * top of them; they call the same data-access functions.
+ *
+ * Multi-event: every data-access call takes the event code explicitly —
+ * the shell's router (app.js) reads it from the hash (#/<code>/<view>).
+ * The code is never hardcoded in JS.
  *
  * Static mode (?static=1 or *.github.io): the data-access functions read
  * the --dump snapshot files from staticDataPath instead of the live API
  * and mark results with `snapshot: true` so the UI can show a badge.
- * The event code comes from the server payload (live) or the index.json
- * entry (static) — it is never hardcoded in JS.
  */
 
 const API = "/api/cvent";
@@ -43,9 +44,9 @@ const STATIC =
 
 /* ---------- module state ---------- */
 
-let eventCode = null;        // from the server payload / index.json entry
-let staticBundle = null;     // static-mode getEvent() cache
-let staticPayments = null;   // static-mode getPayments() cache
+// Static-mode caches, keyed by event code (the site serves multiple events).
+const staticBundles = new Map();  // code -> getEvent() result
+const staticPayments = new Map(); // code -> getPayments() result
 let pollTimer = null;        // repull-status poll
 let repullRunning = false;
 
@@ -53,8 +54,8 @@ let repullRunning = false;
 // server's 15-min cache (busted by the repull) is the single source of
 // freshness, so a plain re-fetch is always correct.
 function bustCache() {
-  staticBundle = null;
-  staticPayments = null;
+  staticBundles.clear();
+  staticPayments.clear();
 }
 
 /* ---------- data access ---------- */
@@ -95,53 +96,65 @@ function assembleStaticBundle(entry, meta, event, raws) {
   return bundle;
 }
 
-async function getEventStatic() {
-  if (staticBundle) return staticBundle;
+async function getEventStatic(code) {
+  if (staticBundles.has(code)) return staticBundles.get(code);
   const idx = await fetchJSON(staticDataPath + "index.json");
-  const entry = Array.isArray(idx) ? idx[0] : idx; // exactly one entry
-  if (!entry || !entry.code) throw new Error("static index has no entry");
-  eventCode = entry.code;
+  const entries = Array.isArray(idx) ? idx : [idx];
+  const entry = entries.find((e) => e && e.code === code) || entries[0];
+  if (!entry || !entry.code) throw new Error("static index has no entry for " + code);
   const dir = staticDataPath + entry.code + "/";
   const [meta, event, ...raws] = await Promise.all([
     fetchJSON(dir + "meta.json"),
     fetchJSON(dir + "event.json"),
     ...RESOURCES.map((k) => fetchJSON(dir + RESOURCE_FILES[k])),
   ]);
-  staticBundle = assembleStaticBundle(entry, meta, event, raws);
-  return staticBundle;
+  const bundle = assembleStaticBundle(entry, meta, event, raws);
+  staticBundles.set(bundle.code, bundle);
+  return bundle;
 }
 
-// The full event bundle (live: /api/cvent/event; static: dump files).
-export async function getEvent() {
-  if (STATIC) return getEventStatic();
-  const b = await fetchJSON(API + "/event");
-  if (b.code) eventCode = b.code;
-  return b;
-}
-
-// Payment summary (live: /api/cvent/event/payments; static: a precomputed
-// payments.json in the event dir if the dump wrote one — v1 dumps do not,
-// so a zeroed summary with the snapshot marker is the graceful fallback).
-export async function getPayments() {
+// The site's event list (live: /api/cvent/events; static: the dump's
+// index.json). Each entry: {code, title, start, end, pulledAt}.
+export async function getEvents() {
   if (STATIC) {
-    if (staticPayments) return staticPayments;
-    if (!eventCode) await getEventStatic();
+    const idx = await fetchJSON(staticDataPath + "index.json");
+    const entries = Array.isArray(idx) ? idx : [idx];
+    return { events: entries.filter((e) => e && e.code), default: entries[0] ? entries[0].code : "" };
+  }
+  return fetchJSON(API + "/events");
+}
+
+// The full event bundle for code (live: /api/cvent/events/<code>;
+// static: that code's dump files).
+export async function getEvent(code) {
+  if (STATIC) return getEventStatic(code);
+  return fetchJSON(API + "/events/" + encodeURIComponent(code));
+}
+
+// Payment summary for code (live: /api/cvent/events/<code>/payments;
+// static: a precomputed payments.json in the event dir if the dump wrote
+// one — v1 dumps do not, so a zeroed summary with the snapshot marker is
+// the graceful fallback).
+export async function getPayments(code) {
+  if (STATIC) {
+    if (staticPayments.has(code)) return staticPayments.get(code);
     try {
-      const p = await fetchJSON(staticDataPath + eventCode + "/payments.json");
+      const p = await fetchJSON(staticDataPath + code + "/payments.json");
       p.snapshot = true;
-      staticPayments = p;
+      staticPayments.set(code, p);
       return p;
     } catch (e) {
-      staticPayments = {
+      const p = {
         totals: { ordered: 0, paid: 0, due: 0, refunded: 0 },
         orders: [],
         cancelled: [],
         snapshot: true,
       };
-      return staticPayments;
+      staticPayments.set(code, p);
+      return p;
     }
   }
-  return fetchJSON(API + "/event/payments");
+  return fetchJSON(API + "/events/" + encodeURIComponent(code) + "/payments");
 }
 
 // Case-insensitive substring over name parts + email + confirmation
@@ -172,11 +185,12 @@ function attendeeHaystack(a) {
   return parts.join(" ").toLowerCase();
 }
 
-// Attendee search (live: /api/cvent/event/attendees?q=&limit=&offset=;
-// static: the same filter run over the dumped attendees array).
-export async function searchAttendees(q, limit, offset) {
+// Attendee search for code (live: /api/cvent/events/<code>/attendees
+// ?q=&limit=&offset=; static: the same filter run over the dumped
+// attendees array).
+export async function searchAttendees(code, q, limit, offset) {
   if (STATIC) {
-    const b = await getEventStatic();
+    const b = await getEventStatic(code);
     const all = Array.isArray(b.attendees) ? b.attendees : [];
     const needle = String(q || "").toLowerCase().trim();
     const matched = needle ? all.filter((a) => attendeeHaystack(a).includes(needle)) : all;
@@ -195,7 +209,7 @@ export async function searchAttendees(q, limit, offset) {
   if (limit != null) params.set("limit", String(limit));
   if (offset != null) params.set("offset", String(offset));
   const qs = params.toString();
-  return fetchJSON(API + "/event/attendees" + (qs ? "?" + qs : ""));
+  return fetchJSON(API + "/events/" + encodeURIComponent(code) + "/attendees" + (qs ? "?" + qs : ""));
 }
 
 /* ---------- repull (live mode only) ---------- */
@@ -206,20 +220,22 @@ export function isRepulling() {
   return repullRunning;
 }
 
-// Triggers the server repull (POST /api/cvent/event/repull) and polls
-// /api/cvent/event/repull-status every POLL_MS while running, stopping
-// when running is false. onComplete(null) fires when the repull finishes
-// (caches busted first) or onComplete(err) when the trigger itself
-// failed. Static mode is a no-op — there is no live source to repull.
-export async function refresh(onComplete) {
+// Triggers the server repull for code (POST /api/cvent/events/<code>/
+// repull) and polls its repull-status every POLL_MS while running,
+// stopping when running is false. onComplete(null) fires when the repull
+// finishes (caches busted first) or onComplete(err) when the trigger
+// itself failed. Static mode is a no-op — there is no live source to
+// repull.
+export async function refresh(code, onComplete) {
   if (STATIC) {
     if (onComplete) onComplete(null);
     return;
   }
   if (repullRunning) return; // a repull is already in flight
   repullRunning = true;
+  const base = API + "/events/" + encodeURIComponent(code);
   try {
-    const res = await fetch(API + "/event/repull", { method: "POST" });
+    const res = await fetch(base + "/repull", { method: "POST" });
     if (!res.ok) throw new Error("HTTP " + res.status);
   } catch (e) {
     repullRunning = false;
@@ -229,7 +245,7 @@ export async function refresh(onComplete) {
   pollTimer = setInterval(async () => {
     let st;
     try {
-      st = await fetchJSON(API + "/event/repull-status");
+      st = await fetchJSON(base + "/repull-status");
     } catch (e) {
       return; // transient failure — still running, try again next tick
     }
@@ -442,11 +458,11 @@ function registrationsCard(bundle) {
   }
   return (
     card(sectionTitle("Registrations") + countHtml +
-    '<table class="tbl sortable"><thead><tr>' +
+    '<div class="tbl-wrap"><table class="tbl sortable"><thead><tr>' +
     sortableTh("Name") + sortableTh("Code") +
     sortableTh("Capacity", true) + sortableTh("Status") +
     "</tr></thead><tbody>" +
-    named.map(regRow).join("") + "</tbody></table>")
+    named.map(regRow).join("") + "</tbody></table></div>")
   );
 }
 
@@ -532,12 +548,12 @@ function pricingCard(bundle, currency) {
   return (
     card(sectionTitle("Pricing", cur ? ' <span class="badge badge-slate">' + esc(cur) + "</span>" : "") +
     note +
-    '<table class="tbl sortable"><thead><tr>' +
+    '<div class="tbl-wrap"><table class="tbl sortable"><thead><tr>' +
     sortableTh("Registration type") +
     sortableTh("Standard", true) + sortableTh("Early bird", true) +
     "</tr></thead><tbody>" +
     body +
-    "</tbody></table>")
+    "</tbody></table></div>")
   );
 }
 
@@ -590,10 +606,10 @@ function paymentsCard(payments, currency) {
         esc(orders.length) + ")</button>"
       : "";
     body =
-      '<table class="tbl"><thead><tr><th>Attendee</th><th>Invoice</th>' +
+      '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Attendee</th><th>Invoice</th>' +
       '<th class="num">Ordered</th><th class="num">Paid</th><th class="num">Due</th>' +
       "<th>Method</th><th>Status</th></tr></thead><tbody>" + visible +
-      "</tbody>" + more + "</table>";
+      "</tbody>" + more + "</table></div>";
   }
   const cancelledLine = cancelled.length
     ? '<div class="muted-line">' +
@@ -623,14 +639,16 @@ function programCard(bundle) {
     const visible = rows.slice(0, CAP).join("");
     const rest = rows.slice(CAP);
     inner +=
-      '<table class="tbl"><thead><tr><th>Name</th><th>Affiliation</th></tr></thead><tbody>' +
+      '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Name</th><th>Affiliation</th></tr></thead><tbody>' +
       visible + "</tbody>" +
       (rest.length
-        ? '<tbody data-more hidden>' + rest.join("") + "</tbody>" +
-          '<button class="expander" data-expand type="button">Show all (' +
-          esc(rows.length) + ")</button>"
+        ? '<tbody data-more hidden>' + rest.join("") + "</tbody>"
         : "") +
-      "</table>";
+      "</table></div>" +
+      (rest.length
+        ? '<button class="expander" data-expand type="button">Show all (' +
+          esc(rows.length) + ")</button>"
+        : "");
   }
   return card(inner);
 }
@@ -721,13 +739,73 @@ function wireDashboard(mount) {
   });
 }
 
-export function home(mount) {
-  loadHome(mount);
+/* ---------- events landing (the multi-event index) ----------
+   One card per event in the catalog. Each card links to #/<code> (that
+   event's dashboard). All text comes from the catalog entries — nothing
+   data-derived is hardcoded. */
+
+function eventCardHtml(entry) {
+  const title = entry.title || entry.code;
+  const dates = entry.start ? fmtRange(entry.start, entry.end || entry.start) : "";
+  const meta = [];
+  if (entry.format) meta.push(esc(entry.format));
+  if (entry.currency) meta.push(esc(entry.currency));
+  const metaHtml = meta.length
+    ? '<div class="event-card-meta">' + meta.join(" · ") + "</div>"
+    : "";
+  return (
+    '<a class="event-card" href="#/' + encodeURIComponent(entry.code) + '">' +
+    '<div class="event-card-title">' + esc(title) + "</div>" +
+    (dates ? '<div class="event-card-dates">' + esc(dates) + "</div>" : "") +
+    metaHtml +
+    '<div class="event-card-code">' + esc(entry.code) + "</div>" +
+    "</a>"
+  );
 }
 
-function loadHome(mount) {
+function eventsListHtml(entries) {
+  if (!entries.length) {
+    return card(
+      '<div class="empty-state">' +
+      '<div class="title">No events</div>' +
+      '<div class="hint">The catalog is empty — pull an event to get started.</div>' +
+      "</div>"
+    );
+  }
+  const cards = entries.map(eventCardHtml).join("");
+  return '<div class="event-grid">' + cards + "</div>";
+}
+
+export function events(mount) {
+  mount.innerHTML = skeletonHtml(3);
+  getEvents()
+    .then((res) => {
+      const entries = Array.isArray(res.events) ? res.events : [];
+      mount.innerHTML = eventsListHtml(entries);
+    })
+    .catch((e) => {
+      const msg = (e && e.message) ? e.message : "unknown error";
+      mount.innerHTML = card(
+        '<div class="empty-state">' +
+        '<div class="title">Couldn&#39;t load events</div>' +
+        '<div class="hint" data-err></div>' +
+        '<button class="btn" data-retry type="button">Retry</button>' +
+        "</div>"
+      );
+      const hint = mount.querySelector("[data-err]");
+      if (hint) hint.textContent = msg;
+      const retry = mount.querySelector("[data-retry]");
+      if (retry) retry.addEventListener("click", () => events(mount));
+    });
+}
+
+export function home(mount, code) {
+  loadHome(mount, code);
+}
+
+function loadHome(mount, code) {
   mount.innerHTML = skeletonHtml(5);
-  Promise.all([getEvent(), getPayments()])
+  Promise.all([getEvent(code), getPayments(code)])
     .then(([bundle, payments]) => {
       mount.innerHTML = dashboardHtml(bundle, payments);
       wireDashboard(mount);
@@ -744,7 +822,7 @@ function loadHome(mount) {
       const hint = mount.querySelector("[data-err]");
       if (hint) hint.textContent = msg;
       const retry = mount.querySelector("[data-retry]");
-      if (retry) retry.addEventListener("click", () => loadHome(mount));
+      if (retry) retry.addEventListener("click", () => loadHome(mount, code));
     });
 }
 
@@ -774,7 +852,8 @@ function ensureNavWatch() {
   attNavWatch = true;
   window.addEventListener("hashchange", () => {
     const h = (location.hash || "").replace(/^#/, "") || "/";
-    if (h !== "/attendees") {
+    // attendees route is #/<code>/attendees — any other path is "away".
+    if (!/\/attendees\/?$/.test(h)) {
       attSeq++; // "close": invalidate the torn-down instance
       closeSheet();
     }
@@ -895,12 +974,13 @@ function attendeeSheetHtml(a) {
   return inner;
 }
 
-// POST /api/cvent/event/checkin. Client body (the plan contract the server
-// handler implements, handlers.go handleCheckin): { attendeeIds: [uuid] }.
+// POST /api/cvent/events/<code>/checkin. Client body (the plan contract
+// the server handler implements, handlers.go handleCheckin):
+// { attendeeIds: [uuid] }.
 // The server maps it onto the Cvent bulk-checkin spec and returns
 // { ok: true } on success; errors surface as non-OK JSON { error }.
-async function checkInAttendee(id) {
-  const res = await fetch(API + "/event/checkin", {
+async function checkInAttendee(code, id) {
+  const res = await fetch(API + "/events/" + encodeURIComponent(code) + "/checkin", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ attendeeIds: [id] }),
@@ -967,9 +1047,9 @@ function attendeesTableHtml(st) {
   return (
     card('<div class="att-count-line">' + esc(r.total) + " attendees</div>") +
     card(
-      '<table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Ticket</th>' +
+      '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Ticket</th>' +
       "<th>Confirmation</th><th>Check-in</th></tr></thead><tbody>" +
-      rows + "</tbody></table>" +
+      rows + "</tbody></table></div>" +
       (remaining > 0
         ? '<button class="expander" data-loadmore type="button">Load more (' +
           esc(remaining) + ")</button>"
@@ -978,7 +1058,7 @@ function attendeesTableHtml(st) {
   );
 }
 
-export function attendees(mount) {
+export function attendees(mount, code) {
   // New instance: bump the sequence (invalidating any previous instance's
   // pending continuations) and drop the previous instance's pending search
   // timer. The token is the authoritative stale guard; the clearTimeout is
@@ -1062,7 +1142,7 @@ export function attendees(mount) {
     if (!state.result) render(mount, skeletonHtml(6)); // skeleton: first load
     let r;
     try {
-      r = await searchAttendees(state.q, 50, offset);
+      r = await searchAttendees(code, state.q, 50, offset);
     } catch (e) {
       state.loading = false;
       if (!isCurrent() || !isMounted()) return; // navigated away mid-fetch
@@ -1159,7 +1239,7 @@ export function attendees(mount) {
           attendeeSheetHtml(a);
       }
     }
-    checkInAttendee(a.id)
+    checkInAttendee(code, a.id)
       .then(() => {
         toastMsg("Checked in");
       })

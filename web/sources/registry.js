@@ -9,9 +9,15 @@
  * Source module contract:
  *   {
  *     label: string,          // display name in nav/tabs
- *     views: { <name>: fn(mount) },  // rendered by the hash router;
- *                                     // each receives the mount element
- *                                     // and manages its own data access
+ *     views: { <name>: fn(mount, code) },
+ *                             // rendered by the hash router; each receives
+ *                             // the mount element and the event code from
+ *                             // the route (#/<code>/<view>). The special
+ *                             // "events" view is the multi-event landing
+ *                             // and takes no code (it lists them).
+ *     getEvents: fn() -> {events, default},
+ *                             // the source's catalog (event list). Drives
+ *                             // the landing view and the topbar selector.
  *     staticDataPath: string, // snapshot dir served at the same origin
  *                             // (the --dump output dir for static mode)
  *   }
@@ -23,9 +29,11 @@ export const SOURCES = {
   cvent: {
     label: "Cvent",
     views: {
+      events: cvent.events,
       home: cvent.home,
       attendees: cvent.attendees,
     },
+    getEvents: cvent.getEvents,
     staticDataPath: "data/",
     // Extra surface beyond the minimal contract: the topbar Refresh button
     // triggers the server repull; sources without a live repull omit this.
