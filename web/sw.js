@@ -1,7 +1,10 @@
 /* Cvent Data service worker.
  *
  * Strategies (same-origin GET only; cross-origin requests are never touched):
- *   precached shell   cache-first, stored only on OK responses
+ *   precached shell   cache-first, stored only on OK responses. The precache
+ *                     list comes from /assets.json (content-hashed file
+ *                     names, computed by the server) — no hardcoded array,
+ *                     so a re-publish needs no SW source change.
  *   /api/cvent/event{,/payments}  network-first with a 5-minute runtime
  *                     cache; on network failure the cached copy is served,
  *                     and if it is >= 5 min old an offline signal is posted
@@ -16,13 +19,21 @@
  * Bump "v1" to force a full re-precache on next activate.
  */
 
-const STATIC_CACHE = "cvent-data-v12";
+const STATIC_CACHE = "cvent-data-v13";
 const API_CACHE = "cvent-data-api-v1";
 const META_CACHE = "cvent-data-api-meta";
 const OFFLINE_CHANNEL = "cvent-data";
 const API_TTL_MS = 5 * 60 * 1000;
 
-const PRECACHE = [
+// Precached paths, populated from /assets.json at install. The regex is the
+// install-independent fallback: a content-hashed shell asset always looks
+// like <name>.<40 hex chars>.<js|css>.
+const PRECACHED = new Set();
+const HASHED_ASSET_RE = /^.+\.[0-9a-f]{40}\.(?:js|css)$/;
+
+// Fallback precache list, used only when /assets.json is unreachable (e.g.
+// a pre-hashing server build). The server's /assets.json is authoritative.
+const PRECACHE_FALLBACK = [
   "/", "/index.html", "/styles.css", "/theme.js", "/app.js",
   "/sources/registry.js", "/sources/cvent.js", "/manifest.webmanifest",
   "/icons/icon-192.png", "/icons/icon-512.png",
@@ -30,15 +41,31 @@ const PRECACHE = [
   "/fonts/manrope-latin.woff2", "/fonts/space-grotesk-latin.woff2",
 ];
 
+/* Fetch the server-computed precache list; the fallback on failure. */
+async function precacheList() {
+  try {
+    const res = await fetch("/assets.json", { cache: "no-store" });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.files) && data.files.length) return data.files;
+    }
+  } catch (err) {
+    /* network or shape problem — fall through to the hardcoded list */
+  }
+  return PRECACHE_FALLBACK;
+}
+
 /* ---------- install: precache the static shell, then skipWaiting ---------- */
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
+      const files = await precacheList();
+      files.forEach((p) => PRECACHED.add(p));
       const cache = await caches.open(STATIC_CACHE);
       try {
         await Promise.all(
-          PRECACHE.map((p) =>
+          files.map((p) =>
             fetch(p).then((res) => {
               if (res && res.ok) return cache.put(p, res); // OK responses only
             })
@@ -108,8 +135,11 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // (e) Precached shell files: strict cache-first.
-  if (PRECACHE.includes(path)) {
+  // (e) Precached shell files (the hashed list from /assets.json):
+  // strict cache-first. A request matching the hashed-asset shape
+  // (name.<40-hex>.js|css) is treated as precached even before install
+  // populated the set.
+  if (PRECACHED.has(path) || HASHED_ASSET_RE.test(path)) {
     event.respondWith(cacheFirst(req));
     return;
   }

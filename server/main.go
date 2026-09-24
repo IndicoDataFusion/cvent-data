@@ -22,6 +22,10 @@ type server struct {
 	webDir  string // directory containing web assets
 	dataDir string // directory with the --dump snapshots, served under /data/
 	eventID string // the one and only event this app serves
+	// assets maps original shell file names to their content-hashed forms
+	// (styles.css -> styles.<sha1>.css). Nil (web dir missing) means plain
+	// unhashed serving.
+	assets *assetTable
 	// cvent is the single-event API handler group (Task 6). Nil when Cvent
 	// credentials could not be loaded: /api/cvent/… then answers 503 while
 	// static serving and /api/health keep working.
@@ -100,7 +104,7 @@ func (s *server) handleEventCatalog(w http.ResponseWriter) {
 }
 
 // staticCacheControl picks the Cache-Control value for a served asset.
-func staticCacheControl(p string) string {
+func (s *server) staticCacheControl(p string) string {
 	switch p {
 	case "index.html", "sw.js", "manifest.webmanifest":
 		// index.html and sw.js must revalidate so shell updates land;
@@ -109,6 +113,13 @@ func staticCacheControl(p string) string {
 			return "public, max-age=31536000, immutable"
 		}
 		return "no-cache"
+	}
+	// Content-hashed shell files (styles.<sha1>.css, …): immutable — the
+	// URL changes with every content change, so long caching is safe.
+	if s.assets != nil {
+		if _, ok := s.assets.byHashed[p]; ok {
+			return "public, max-age=31536000, immutable"
+		}
 	}
 	if strings.HasPrefix(p, "icons/") || strings.HasPrefix(p, "fonts/") {
 		return "public, max-age=31536000, immutable"
@@ -140,7 +151,9 @@ func contentType(path string) string {
 	return "application/octet-stream"
 }
 
-// serveIndex writes web/index.html with no-cache headers.
+// serveIndex writes web/index.html with no-cache headers, rewriting the
+// shell asset references to their content-hashed forms (the hashed file
+// names ARE the cache-bust: a new content = a new URL).
 func (s *server) serveIndex(w http.ResponseWriter) {
 	b, err := os.ReadFile(filepath.Join(s.webDir, "index.html"))
 	if err != nil {
@@ -148,17 +161,39 @@ func (s *server) serveIndex(w http.ResponseWriter) {
 		http.Error(w, "index.html missing", http.StatusNotFound)
 		return
 	}
+	if s.assets != nil {
+		b = []byte(s.assets.rewrite(string(b)))
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Write(b)
 }
 
+// assetsJSON publishes the content-hashed precache list at /assets.json:
+// the service worker reads it instead of hardcoding a PRECACHE array, so a
+// re-publish (new hashes) needs no SW source change — the worker's own
+// no-cache revalidation picks up the new list.
+func (s *server) assetsJSON(w http.ResponseWriter) {
+	files := []string{"/", "/index.html"}
+	if s.assets != nil {
+		files = s.assets.fileList()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"files": files})
+}
+
 // handleStatic serves files from the web dir with SPA fallback: a path that
-// doesn't map to an existing file falls back to index.html.
+// doesn't map to an existing file falls back to index.html. Content-hashed
+// shell paths (styles.<sha1>.css) are resolved back to the original file on
+// disk; the original names still serve too (so a stale index.html referencing
+// them, or a direct link, keeps working — same bytes either way).
 func (s *server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	p := strings.TrimPrefix(r.URL.Path, "/")
 	if p == "" {
 		s.serveIndex(w)
+		return
+	}
+	if p == "assets.json" {
+		s.assetsJSON(w)
 		return
 	}
 	// Resolve within the web dir (no traversal).
@@ -169,9 +204,22 @@ func (s *server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	}
 	if fi, err := os.Stat(full); err == nil && !fi.IsDir() {
 		w.Header().Set("Content-Type", contentType(p))
-		w.Header().Set("Cache-Control", staticCacheControl(p))
+		w.Header().Set("Cache-Control", s.staticCacheControl(p))
 		http.ServeFile(w, r, full)
 		return
+	}
+	// Not on disk under the requested name — try the hashed-name mapping
+	// (styles.<sha1>.css -> styles.css on disk).
+	if s.assets != nil {
+		if orig, ok := s.assets.hashedFor(p); ok {
+			origFull := filepath.Join(s.webDir, filepath.Clean("/"+orig))
+			if fi, err := os.Stat(origFull); err == nil && !fi.IsDir() {
+				w.Header().Set("Content-Type", contentType(orig))
+				w.Header().Set("Cache-Control", s.staticCacheControl(p))
+				http.ServeFile(w, r, origFull)
+				return
+			}
+		}
 	}
 	// SPA fallback for non-existent paths (and directory paths).
 	s.serveIndex(w)
@@ -326,6 +374,15 @@ func main() {
 	}
 
 	s := &server{webDir: webDir, dataDir: dataDir, eventID: eventID}
+
+	// Content-hashed shell assets (styles.<sha1>.css, …). A missing web dir
+	// is not fatal here: the server starts with plain unhashed serving (the
+	// 404s will surface per-request).
+	assets, aerr := loadAssets(webDir)
+	if aerr != nil {
+		log.Printf("assets: %v — serving without content hashes", aerr)
+	}
+	s.assets = assets
 
 	mux := buildRouter(s)
 
