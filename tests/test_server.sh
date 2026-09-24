@@ -277,7 +277,7 @@ ctype=$(curl -s -o /dev/null -w '%{content_type}' "$BASE/x/y")
 [ "$code" = "200" ]; check $? "/x/y (no file) -> 200 SPA fallback (got $code)"
 case "$ctype" in text/html*) : ;; *) die "content-type $ctype, expected text/html" ;; esac
 pass "SPA fallback content-type is text/html"
-grep -q 'Cvent Data' "$WORK/spa.html" \
+grep -q 'Event Data' "$WORK/spa.html" \
   && pass "SPA fallback body is index.html (marker found)" \
   || die "SPA fallback body missing index.html marker"
 
