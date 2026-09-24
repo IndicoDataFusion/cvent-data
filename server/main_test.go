@@ -63,12 +63,12 @@ func TestCventMissingCreds(t *testing.T) {
 	// including an unknown cvent sub-path (the source exists, just has no
 	// client). Spec (Task 6): missing creds must NOT 404 "unknown source".
 	for _, path := range []string{
-		"/api/cvent/event",
-		"/api/cvent/event/payments",
-		"/api/cvent/event/attendees",
-		"/api/cvent/event/checkin",
-		"/api/cvent/event/repull",
-		"/api/cvent/event/repull-status",
+		"/api/cvent/events/TESTCODE01",
+		"/api/cvent/events/TESTCODE01/payments",
+		"/api/cvent/events/TESTCODE01/attendees",
+		"/api/cvent/events/TESTCODE01/checkin",
+		"/api/cvent/events/TESTCODE01/repull",
+		"/api/cvent/events/TESTCODE01/repull-status",
 		"/api/cvent/bogus",
 	} {
 		code, body := get(path)
@@ -85,6 +85,27 @@ func TestCventMissingCreds(t *testing.T) {
 	code, body := get("/api/health")
 	if code != http.StatusOK {
 		t.Errorf("GET /api/health: status = %d, want 200 (body %q)", code, body)
+	}
+
+	// The catalog (/api/cvent/events) is a local index.json read, so it
+	// works even with no credentials: 200 with an empty events array (the
+	// temp data dir has no index.json) and the default code.
+	code, body = get("/api/cvent/events")
+	if code != http.StatusOK {
+		t.Errorf("GET /api/cvent/events: status = %d, want 200 (body %q)", code, body)
+	}
+	var cat struct {
+		Events  []any `json:"events"`
+		Default string `json:"default"`
+	}
+	if err := json.Unmarshal([]byte(body), &cat); err != nil {
+		t.Fatalf("catalog decode: %v (body %q)", err, body)
+	}
+	if len(cat.Events) != 0 {
+		t.Errorf("catalog events = %d, want 0 (no index.json)", len(cat.Events))
+	}
+	if cat.Default != defaultEventID {
+		t.Errorf("catalog default = %q, want %q", cat.Default, defaultEventID)
 	}
 
 	// An unknown source is STILL 404 "unknown source" — the fix must not turn

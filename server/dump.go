@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -72,8 +73,8 @@ type dumpMeta struct {
 }
 
 // dumpIndexEntry is one element of <dir>/index.json — the static-mode
-// discovery file (?static=1): the SPA reads it to find the event code
-// without a live API. Exactly one entry: the app serves one event.
+// discovery file (?static=1): the SPA reads it to find the events without a
+// live API. One entry per dumped event; writeDump upserts by code.
 type dumpIndexEntry struct {
 	Code     string `json:"code"`
 	Title    string `json:"title"`
@@ -181,20 +182,48 @@ func writeDump(dir string, b *EventBundle) error {
 		return err
 	}
 
-	// <dir>/index.json — static-mode discovery (one entry, this event).
+	// <dir>/index.json — static-mode discovery (one entry per dumped
+	// event). MERGED with any existing index so a re-dump of one event
+	// keeps the other events the site shows; the current event's entry is
+	// upserted (matched by code) and the list is sorted by start date.
 	var ev struct {
 		Title string `json:"title"`
 		Start string `json:"start"`
 		End   string `json:"end"`
 	}
 	_ = json.Unmarshal(b.Event, &ev) // lenient: missing fields → ""
-	idxJSON, err := json.MarshalIndent([]dumpIndexEntry{{
+	entries := []dumpIndexEntry{}
+	if old, rerr := os.ReadFile(filepath.Join(dir, "index.json")); rerr == nil {
+		_ = json.Unmarshal(old, &entries) // unparseable → start fresh
+	}
+	if entries == nil {
+		entries = []dumpIndexEntry{}
+	}
+	entry := dumpIndexEntry{
 		Code:     b.Code,
 		Title:    ev.Title,
 		Start:    ev.Start,
 		End:      ev.End,
 		PulledAt: b.PulledAt,
-	}}, "", "  ")
+	}
+	replaced := false
+	for i, e := range entries {
+		if e.Code == b.Code {
+			entries[i] = entry
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		entries = append(entries, entry)
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].Start != entries[j].Start {
+			return entries[i].Start < entries[j].Start
+		}
+		return entries[i].Title < entries[j].Title
+	})
+	idxJSON, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal index.json: %v", err)
 	}

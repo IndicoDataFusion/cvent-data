@@ -45,7 +45,11 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 // handleAPI routes /api/<source>/… to the source registry. /api/health is
-// special-cased before the registry.
+// special-cased before the registry. The Cvent catalog (/api/cvent/events,
+// the event list) is also special-cased: it is a local read of
+// <data>/index.json so it works even when Cvent credentials are missing
+// (the cvent handler group is nil then, but the site's event list still
+// renders from the dump).
 func (s *server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/")
 	source := rest
@@ -60,6 +64,10 @@ func (s *server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if source == "cvent" && strings.TrimPrefix(r.URL.Path, "/api/cvent/") == "events" {
+		s.handleEventCatalog(w)
+		return
+	}
 	h, ok := sources[source]
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown source"})
@@ -70,6 +78,25 @@ func (s *server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h(s, w, r)
+}
+
+// handleEventCatalog serves the site's event list: the parsed
+// <data>/index.json (the --dump discovery file, one entry per dumped event)
+// plus the --event default code so the frontend can mark it. A missing or
+// unparseable index.json yields an empty events array (the frontend then
+// shows its empty state) rather than an error.
+func (s *server) handleEventCatalog(w http.ResponseWriter) {
+	events := []any{}
+	if b, err := os.ReadFile(filepath.Join(s.dataDir, "index.json")); err == nil {
+		_ = json.Unmarshal(b, &events)
+	}
+	if events == nil {
+		events = []any{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"events":  events,
+		"default": s.eventID,
+	})
 }
 
 // staticCacheControl picks the Cache-Control value for a served asset.

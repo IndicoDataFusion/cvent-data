@@ -58,7 +58,7 @@ func testCventUpstream(t *testing.T, checkInStatus int, checkInBody string) (*ht
 
 func doCheckin(t *testing.T, h *cventHandlers, body string) (int, map[string]any) {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/api/cvent/event/checkin", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/cvent/events/TESTCODE01/checkin", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	h.route(rec, req)
@@ -72,7 +72,7 @@ func TestCheckinHandlerSuccess(t *testing.T) {
 	h := newTestCventStack(t, upstream, "TESTCODE01")
 
 	// Prime the cache so eventUUID() has a resolved event.
-	if _, err := h.cache.bundle(context.Background(), h.code); err != nil {
+	if _, err := h.cache.bundle(context.Background(), h.defaultCode); err != nil {
 		t.Fatalf("prime bundle: %v", err)
 	}
 
@@ -89,7 +89,7 @@ func TestCheckinHandlerSuccess(t *testing.T) {
 	// Cache must be invalidated so the next read re-fetches.
 	// (We can't observe the fetch directly here without a counter on
 	// /events, but eventUUID must now be false: the entry is gone.)
-	if _, ok := h.cache.eventUUID(h.code); ok {
+	if _, ok := h.cache.eventUUID(h.defaultCode); ok {
 		t.Fatalf("cache was not invalidated after check-in")
 	}
 }
@@ -146,7 +146,7 @@ func TestCheckinHandlerNoCache(t *testing.T) {
 func TestCheckinHandlerUpstreamError(t *testing.T) {
 	upstream, _ := testCventUpstream(t, http.StatusForbidden, `{"error":"missing scope"}`)
 	h := newTestCventStack(t, upstream, "TESTCODE01")
-	if _, err := h.cache.bundle(context.Background(), h.code); err != nil {
+	if _, err := h.cache.bundle(context.Background(), h.defaultCode); err != nil {
 		t.Fatalf("prime bundle: %v", err)
 	}
 	code, out := doCheckin(t, h, `{"attendeeIds":["att-1"]}`)
@@ -157,7 +157,7 @@ func TestCheckinHandlerUpstreamError(t *testing.T) {
 		t.Fatalf("error = %v, want upstream error text", out["error"])
 	}
 	// On Cvent error the cache must NOT be invalidated.
-	if _, ok := h.cache.eventUUID(h.code); !ok {
+	if _, ok := h.cache.eventUUID(h.defaultCode); !ok {
 		t.Fatalf("cache must survive a failed check-in")
 	}
 }
@@ -192,10 +192,10 @@ func TestAttendeesSearchAndPaging(t *testing.T) {
 		{"id":"a4","confirmationNumber":"CONF789","contact":{"firstName":"Edsger","lastName":"Dijkstra","email":"edsger@example.com"}}
 	]`)
 	ec.mu.Lock()
-	ec.store(h.code, b)
+	ec.store(h.defaultCode, b)
 	ec.mu.Unlock()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/cvent/event/attendees?q=lovel", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/cvent/events/TESTCODE01/attendees?q=lovel", nil)
 	rec := httptest.NewRecorder()
 	h.route(rec, req)
 	if rec.Code != http.StatusOK {
@@ -221,7 +221,7 @@ func TestAttendeesSearchAndPaging(t *testing.T) {
 	}
 
 	// No query: paging.
-	req = httptest.NewRequest(http.MethodGet, "/api/cvent/event/attendees?limit=2&offset=1", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/cvent/events/TESTCODE01/attendees?limit=2&offset=1", nil)
 	rec = httptest.NewRecorder()
 	h.route(rec, req)
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
@@ -232,7 +232,7 @@ func TestAttendeesSearchAndPaging(t *testing.T) {
 	}
 
 	// limit clamps to 200.
-	req = httptest.NewRequest(http.MethodGet, "/api/cvent/event/attendees?limit=500", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/cvent/events/TESTCODE01/attendees?limit=500", nil)
 	rec = httptest.NewRecorder()
 	h.route(rec, req)
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
@@ -243,7 +243,7 @@ func TestAttendeesSearchAndPaging(t *testing.T) {
 	}
 
 	// Email search is case-insensitive.
-	req = httptest.NewRequest(http.MethodGet, "/api/cvent/event/attendees?q=GRACE@EXAMPLE.COM", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/cvent/events/TESTCODE01/attendees?q=GRACE@EXAMPLE.COM", nil)
 	rec = httptest.NewRecorder()
 	h.route(rec, req)
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
@@ -281,10 +281,10 @@ func TestPaymentsHandlerZeroRows(t *testing.T) {
 	b := &EventBundle{Code: "TESTCODE01", PulledAt: time.Now().UTC().Format(time.RFC3339)}
 	b.Event = json.RawMessage(`{"id":"` + testCheckinUUID + `"}`)
 	ec.mu.Lock()
-	ec.store(h.code, b)
+	ec.store(h.defaultCode, b)
 	ec.mu.Unlock()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/cvent/event/payments", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/cvent/events/TESTCODE01/payments", nil)
 	rec := httptest.NewRecorder()
 	h.route(rec, req)
 	if rec.Code != http.StatusOK {
@@ -307,7 +307,7 @@ func TestRepullStatusAndRepull(t *testing.T) {
 	h := newTestCventStack(t, upstream, "TESTCODE01")
 
 	// Before anything: not running, no pulledAt.
-	req := httptest.NewRequest(http.MethodGet, "/api/cvent/event/repull-status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/cvent/events/TESTCODE01/repull-status", nil)
 	rec := httptest.NewRecorder()
 	h.route(rec, req)
 	var st struct {
@@ -322,7 +322,7 @@ func TestRepullStatusAndRepull(t *testing.T) {
 	}
 
 	// First repull: started=true, then the background fetch lands.
-	req = httptest.NewRequest(http.MethodPost, "/api/cvent/event/repull", nil)
+	req = httptest.NewRequest(http.MethodPost, "/api/cvent/events/TESTCODE01/repull", nil)
 	rec = httptest.NewRecorder()
 	h.route(rec, req)
 	var out map[string]any
@@ -337,7 +337,7 @@ func TestRepullStatusAndRepull(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		h.mu.Lock()
-		running := h.running[h.code]
+		running := h.running[h.defaultCode]
 		h.mu.Unlock()
 		if !running {
 			break
@@ -347,12 +347,12 @@ func TestRepullStatusAndRepull(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if _, err := h.cache.bundle(context.Background(), h.code); err != nil {
+	if _, err := h.cache.bundle(context.Background(), h.defaultCode); err != nil {
 		t.Fatalf("post-repull bundle: %v", err)
 	}
 
 	// Status now: not running, pulledAt set.
-	req = httptest.NewRequest(http.MethodGet, "/api/cvent/event/repull-status", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/cvent/events/TESTCODE01/repull-status", nil)
 	rec = httptest.NewRecorder()
 	h.route(rec, req)
 	if err := json.Unmarshal(rec.Body.Bytes(), &st); err != nil {
@@ -366,7 +366,7 @@ func TestRepullStatusAndRepull(t *testing.T) {
 func TestRouteNotFound(t *testing.T) {
 	client := newCventClient("http://127.0.0.1:0", "c", "s")
 	h := newCventHandlers("TESTCODE01", client, newEventCache(client))
-	req := httptest.NewRequest(http.MethodGet, "/api/cvent/event/nope", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/cvent/events/TESTCODE01/nope", nil)
 	rec := httptest.NewRecorder()
 	h.route(rec, req)
 	if rec.Code != http.StatusNotFound {

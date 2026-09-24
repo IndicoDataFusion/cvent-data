@@ -13,47 +13,76 @@ import (
 	"time"
 )
 
-// cventHandlers serves the single-event /api/cvent/… routes (Task 6). The
-// event is fixed at construction (the app's one event); there is no event id
-// in the URL and no /events list endpoint.
+// cventHandlers serves the /api/cvent/… routes (Task 6, multi-event). Every
+// event-scoped route carries the event code in the path:
+//
+//	GET  /api/cvent/events/<code>                bundle
+//	GET  /api/cvent/events/<code>/payments
+//	GET  /api/cvent/events/<code>/attendees?q=&limit=&offset=
+//	POST /api/cvent/events/<code>/checkin
+//	POST /api/cvent/events/<code>/repull
+//	GET  /api/cvent/events/<code>/repull-status
+//
+// The catalog (GET /api/cvent/events — the list of events the site shows) is
+// served by handleAPI in main.go, not here: it is a local-file read of
+// data/index.json and must work even when Cvent credentials are missing.
 type cventHandlers struct {
-	code   string // the one event this app serves
-	client *cventClient
-	cache  *eventCache
+	defaultCode string // the --event default; surfaced as the catalog "default"
+	client      *cventClient
+	cache       *eventCache
 
 	mu      sync.Mutex
 	running map[string]bool // code → background repull in flight
 }
 
-func newCventHandlers(code string, c *cventClient, ec *eventCache) *cventHandlers {
-	return &cventHandlers{code: code, client: c, cache: ec, running: map[string]bool{}}
+func newCventHandlers(defaultCode string, c *cventClient, ec *eventCache) *cventHandlers {
+	return &cventHandlers{defaultCode: defaultCode, client: c, cache: ec, running: map[string]bool{}}
 }
 
-// route dispatches the /api/cvent/ sub-paths. Unknown sub-path → 404.
+// route dispatches the /api/cvent/ sub-paths. The bare /api/cvent/events
+// catalog is handled upstream in handleAPI; everything else here is
+// events/<code>[/<sub>]. Unknown sub-path → 404.
 func (h *cventHandlers) route(w http.ResponseWriter, r *http.Request) {
-	switch strings.TrimPrefix(r.URL.Path, "/api/cvent/") {
-	case "event":
-		h.handleEvent(w, r)
-	case "event/payments":
-		h.handlePayments(w, r)
-	case "event/attendees":
-		h.handleAttendees(w, r)
-	case "event/checkin":
-		h.handleCheckin(w, r)
-	case "event/repull":
-		h.handleRepull(w, r)
-	case "event/repull-status":
-		h.handleRepullStatus(w, r)
+	rest := strings.TrimPrefix(r.URL.Path, "/api/cvent/")
+	// rest should be "events/<code>" or "events/<code>/<sub>".
+	after := strings.TrimPrefix(rest, "events/")
+	if after == rest { // not an events/ path
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	parts := strings.SplitN(after, "/", 2)
+	code := parts[0]
+	if code == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	sub := ""
+	if len(parts) > 1 {
+		sub = parts[1]
+	}
+	switch sub {
+	case "":
+		h.handleEvent(w, r, code)
+	case "payments":
+		h.handlePayments(w, r, code)
+	case "attendees":
+		h.handleAttendees(w, r, code)
+	case "checkin":
+		h.handleCheckin(w, r, code)
+	case "repull":
+		h.handleRepull(w, r, code)
+	case "repull-status":
+		h.handleRepullStatus(w, r, code)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
 }
 
-// handleEvent serves the cached event bundle. A bundle error (event
+// handleEvent serves the cached event bundle for code. A bundle error (event
 // resolution failed) is a 502 with the message; per-resource failures are
 // NOT errors — they ride inside the bundle's Errors map.
-func (h *cventHandlers) handleEvent(w http.ResponseWriter, r *http.Request) {
-	b, err := h.cache.bundle(r.Context(), h.code)
+func (h *cventHandlers) handleEvent(w http.ResponseWriter, r *http.Request, code string) {
+	b, err := h.cache.bundle(r.Context(), code)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
@@ -63,8 +92,8 @@ func (h *cventHandlers) handleEvent(w http.ResponseWriter, r *http.Request) {
 
 // handlePayments builds the payment summary over the cached bundle's orders
 // + transactions, joining attendee display names.
-func (h *cventHandlers) handlePayments(w http.ResponseWriter, r *http.Request) {
-	b, err := h.cache.bundle(r.Context(), h.code)
+func (h *cventHandlers) handlePayments(w http.ResponseWriter, r *http.Request, code string) {
+	b, err := h.cache.bundle(r.Context(), code)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
@@ -173,11 +202,12 @@ func attendeeIDAndName(raw json.RawMessage) (string, string) {
 	return strField(a, "id"), joinName(first, middle, last)
 }
 
-// handleAttendees searches the cached attendees: case-insensitive substring
-// over all name parts + email + confirmationNumber. limit defaults to 50
-// and caps at 200; offset defaults to 0. items are the raw attendee objects.
-func (h *cventHandlers) handleAttendees(w http.ResponseWriter, r *http.Request) {
-	b, err := h.cache.bundle(r.Context(), h.code)
+// handleAttendees searches the cached attendees for code: case-insensitive
+// substring over all name parts + email + confirmationNumber. limit defaults
+// to 50 and caps at 200; offset defaults to 0. items are the raw attendee
+// objects.
+func (h *cventHandlers) handleAttendees(w http.ResponseWriter, r *http.Request, code string) {
+	b, err := h.cache.bundle(r.Context(), code)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
@@ -258,14 +288,14 @@ func attendeeMatches(raw json.RawMessage, q string) bool {
 	return false
 }
 
-// handleCheckin checks in attendees. Request body (plan contract):
+// handleCheckin checks in attendees for code. Request body (plan contract):
 // {"attendeeIds": ["uuid", ...]}. The Cvent spec (openapi.json,
 // POST /events/{id}/check-in, schema bulk-checkin) takes a BULK ARRAY of
 // {"id", "checkIn"} objects instead — this handler maps the plan shape onto
 // the spec, stamping each checkIn with the current time. At most 100
 // attendees per call (spec limit). On success the event cache is
 // invalidated so the next read re-fetches fresh check-in status.
-func (h *cventHandlers) handleCheckin(w http.ResponseWriter, r *http.Request) {
+func (h *cventHandlers) handleCheckin(w http.ResponseWriter, r *http.Request, code string) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
@@ -293,11 +323,11 @@ func (h *cventHandlers) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// uuid comes from the cached bundle's Event field (same resolution the
-	// bundle used); no fetch here — the UI always reads /event first, so a
-	// missing cache means nothing to check in against.
-	uuid, ok := h.cache.eventUUID(h.code)
+	// bundle used); no fetch here — the UI always reads /events/<code> first,
+	// so a missing cache means nothing to check in against.
+	uuid, ok := h.cache.eventUUID(code)
 	if !ok {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "event bundle not cached (fetch /api/cvent/event first)"})
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "event bundle not cached (fetch /api/cvent/events/" + code + " first)"})
 		return
 	}
 
@@ -319,7 +349,7 @@ func (h *cventHandlers) handleCheckin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": text})
 		return
 	}
-	h.cache.invalidate(h.code)
+	h.cache.invalidate(code)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -354,49 +384,50 @@ func (h *cventHandlers) postCheckin(ctx context.Context, uuid string, payload []
 	return resp.StatusCode, raw, nil
 }
 
-// handleRepull forces a background re-fetch: invalidate the cache, then
-// fetch on a detached 20s context (client disconnects must not cancel it).
-// The request returns immediately; concurrent repulls for the same event
-// report running:true instead of starting a second fetch.
-func (h *cventHandlers) handleRepull(w http.ResponseWriter, r *http.Request) {
+// handleRepull forces a background re-fetch for code: invalidate the cache,
+// then fetch on a detached 20s context (client disconnects must not cancel
+// it). The request returns immediately; concurrent repulls for the same
+// event report running:true instead of starting a second fetch.
+func (h *cventHandlers) handleRepull(w http.ResponseWriter, r *http.Request, code string) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
 	h.mu.Lock()
-	if h.running[h.code] {
+	if h.running[code] {
 		h.mu.Unlock()
 		writeJSON(w, http.StatusOK, map[string]bool{"started": false, "running": true})
 		return
 	}
-	h.running[h.code] = true
+	h.running[code] = true
 	h.mu.Unlock()
 
-	h.cache.invalidate(h.code)
+	h.cache.invalidate(code)
 	fctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 20*time.Second)
 	go func() {
 		defer cancel()
-		_, err := h.cache.bundle(fctx, h.code)
+		_, err := h.cache.bundle(fctx, code)
 		if err != nil {
-			log.Printf("cvent repull %s: %v", h.code, err)
+			log.Printf("cvent repull %s: %v", code, err)
 		}
 		h.mu.Lock()
-		delete(h.running, h.code)
+		delete(h.running, code)
 		h.mu.Unlock()
 	}()
 	writeJSON(w, http.StatusOK, map[string]bool{"started": true})
 }
 
-// handleRepullStatus reports running (a background repull is in flight) and
-// pulledAt (the cached bundle's pull time, null when the cache is empty).
-func (h *cventHandlers) handleRepullStatus(w http.ResponseWriter, r *http.Request) {
+// handleRepullStatus reports running (a background repull is in flight for
+// code) and pulledAt (the cached bundle's pull time, null when the cache is
+// empty).
+func (h *cventHandlers) handleRepullStatus(w http.ResponseWriter, r *http.Request, code string) {
 	h.mu.Lock()
-	running := h.running[h.code]
+	running := h.running[code]
 	h.mu.Unlock()
 
 	var pulledAt *string
 	h.cache.mu.Lock()
-	if e, ok := h.cache.entries[h.code]; ok && e.bundle != nil {
+	if e, ok := h.cache.entries[code]; ok && e.bundle != nil {
 		s := e.bundle.PulledAt
 		pulledAt = &s
 	}
