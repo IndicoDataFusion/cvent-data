@@ -75,12 +75,17 @@ type dumpMeta struct {
 // dumpIndexEntry is one element of <dir>/index.json — the static-mode
 // discovery file (?static=1): the SPA reads it to find the events without a
 // live API. One entry per dumped event; writeDump upserts by code.
+// ShortName is an optional compact label for the topbar event selector
+// (e.g. "CONF27"); the frontend falls back to Title when absent. A re-dump
+// preserves a previously stored ShortName (it is not derivable from the
+// Cvent event object).
 type dumpIndexEntry struct {
-	Code     string `json:"code"`
-	Title    string `json:"title"`
-	Start    string `json:"start"`
-	End      string `json:"end"`
-	PulledAt string `json:"pulledAt"`
+	Code      string `json:"code"`
+	Title     string `json:"title"`
+	ShortName string `json:"shortName,omitempty"`
+	Start     string `json:"start"`
+	End       string `json:"end"`
+	PulledAt  string `json:"pulledAt"`
 }
 
 // runDump is the one-shot --dump mode: fetch the configured event's bundle
@@ -209,6 +214,9 @@ func writeDump(dir string, b *EventBundle) error {
 	replaced := false
 	for i, e := range entries {
 		if e.Code == b.Code {
+			if entry.ShortName == "" {
+				entry.ShortName = e.ShortName // preserve the stored label
+			}
 			entries[i] = entry
 			replaced = true
 			break

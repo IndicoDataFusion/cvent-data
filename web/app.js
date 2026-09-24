@@ -117,7 +117,10 @@ async function loadCatalog() {
   events.forEach((e) => {
     const opt = document.createElement("option");
     opt.value = e.code;
-    opt.textContent = e.title || e.code;
+    // Compact label first (shortName in the catalog, e.g. "CONF27"); the
+    // full title only when no short label exists.
+    opt.textContent = e.shortName || e.title || e.code;
+    opt.title = e.title || e.code;
     eventSelect.appendChild(opt);
   });
   eventSelect.hidden = false;
