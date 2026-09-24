@@ -515,6 +515,43 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
   padding-left: 10px;
   border-left: 3px solid var(--accent);
 }
+/* ---------- collapsible section heads (the dashboard data cards) ----------
+   The section head becomes the card's toggle: a full-width button so the
+   whole header row is the tap target. The chevron sits at the right edge
+   and rotates when collapsed. .sec-card.collapsed hides .sec-body and
+   drops the bottom margin (a collapsed card is just its header row). */
+.section-head.sec-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 10px 8px 10px 10px;
+  border: none;
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  color: var(--accent);
+  text-align: left;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.section-head.sec-toggle:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.section-head.sec-toggle:active { transform: translateY(1px); }
+/* the section-head's own margin is re-applied to the body, not the head */
+.sec-card .sec-body { margin-top: 10px; }
+.sec-card.collapsed .sec-body { display: none; }
+.sec-card.collapsed { padding-bottom: 8px; }
+.sec-card:not(.collapsed) { padding-bottom: 14px; }
+.sec-ind {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--muted);
+  transition: transform .15s ease;
+  flex: 0 0 auto;
+}
+.sec-card.collapsed .sec-ind { transform: rotate(-90deg); }
 /* the "Show all (N)" expander — a subtle full-width text button */
 .expander {
   width: 100%;
@@ -657,7 +694,7 @@ html[data-theme="light"] .btn, html:not([data-theme="dark"]) .btn { color: #ffff
 
 /* ================= touch targets (coarse pointers) ================= */
 @media (pointer: coarse) {
-  .chip, .topbar-btn, .btn, .expander, .tbl tbody tr, .tbl th[data-sort] { position: relative; }
+  .chip, .topbar-btn, .btn, .expander, .tbl tbody tr, .tbl th[data-sort], .sec-toggle { position: relative; }
   .chip::after { content: ""; position: absolute; inset: -6px; }
   .topbar-btn::after { content: ""; position: absolute; inset: -4px; }
   .btn::after { content: ""; position: absolute; inset: -4px; }

@@ -391,14 +391,66 @@ function sectionTitle(label, badgeHtml) {
   );
 }
 
+/* ---------- collapsible sections ----------
+   The dashboard's data sections (Registrations, Pricing, Payments, Program)
+   collapse under their section head, which is a <button> (44px touch
+   target, keyboard-operable, aria-expanded). The open/closed state
+   persists per event in localStorage (cvent-data-sec-<code>). The event
+   header card is never collapsible. */
+
+function secStorageKey(code) {
+  return "cvent-data-sec-" + code;
+}
+
+function isSecCollapsed(code, key) {
+  try {
+    const s = JSON.parse(localStorage.getItem(secStorageKey(code)) || "{}");
+    return s[key] === true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function setSecCollapsed(code, key, collapsed) {
+  let s = {};
+  try {
+    s = JSON.parse(localStorage.getItem(secStorageKey(code)) || "{}");
+  } catch (e) {
+    /* fresh state */
+  }
+  s[key] = collapsed;
+  try {
+    localStorage.setItem(secStorageKey(code), JSON.stringify(s));
+  } catch (e) {
+    /* storage unavailable — state just won't persist */
+  }
+}
+
+// A card whose section head toggles its body. key is the stable section
+// id ("registrations", "pricing", …) used for the persisted state.
+function collapsibleCard(code, key, label, badgeHtml, bodyHtml) {
+  const collapsed = isSecCollapsed(code, key);
+  return (
+    '<div class="card sec-card' + (collapsed ? " collapsed" : "") + '">' +
+    '<button class="section-head sec-toggle" type="button" data-sec="' + esc(key) + '"' +
+    ' aria-expanded="' + String(!collapsed) + '">' +
+    escapeHtml(label) + (badgeHtml || "") +
+    '<span class="sec-ind" aria-hidden="true">&#9662;</span></button>' +
+    '<div class="sec-body">' + bodyHtml + "</div>" +
+    "</div>"
+  );
+}
+
 // Header card: title, code, dates, format badge, stale/snapshot state.
 // (Refresh lives in the topbar — app.js — not here.)
 function headerCard(bundle) {
   const ev = bundle.event || {};
+  const counts = bundle.counts || {};
+  const total = Number.isFinite(counts.attendees) ? counts.attendees : null;
   const badges = [];
   if (bundle.snapshot) badges.push('<span class="badge badge-slate">Snapshot</span>');
   if (bundle.stale) badges.push('<span class="badge badge-amber">Stale</span>');
-  if (ev.format) badges.push('<span class="badge badge-slate">' + esc(ev.format) + "</span>");
+  if (total != null) badges.push('<span class="badge badge-slate">' + esc(total) + " registered</span>");
   return card(
     '<div class="head-row">' +
     "<div><div class=\"dash-title\">" + esc(ev.title || "Event dashboard") + "</div>" +
@@ -446,6 +498,7 @@ function sortableTh(label, numeric) {
 // registration type (name, code, capacity, Open/Full). Columns sort on
 // header tap (asc → desc → original order).
 function registrationsCard(bundle) {
+  const code = bundle.code || "";
   const counts = bundle.counts || {};
   const total = Number.isFinite(counts.attendees) ? counts.attendees : 0;
   const types = Array.isArray(bundle.registrationTypes) ? bundle.registrationTypes : [];
@@ -454,16 +507,16 @@ function registrationsCard(bundle) {
     '<div class="dash-count">' + esc(total) +
     '<div class="dash-sub">attendees</div></div>';
   if (!named.length) {
-    return card(sectionTitle("Registrations") + countHtml + '<div class="empty-state"><div class="hint">No registration types</div></div>');
+    return collapsibleCard(code, "registrations", "Registrations", "",
+      countHtml + '<div class="empty-state"><div class="hint">No registration types</div></div>');
   }
-  return (
-    card(sectionTitle("Registrations") + countHtml +
+  return collapsibleCard(code, "registrations", "Registrations", "",
+    countHtml +
     '<div class="tbl-wrap"><table class="tbl sortable"><thead><tr>' +
     sortableTh("Name") + sortableTh("Code") +
     sortableTh("Capacity", true) + sortableTh("Status") +
     "</tr></thead><tbody>" +
-    named.map(regRow).join("") + "</tbody></table></div>")
-  );
+    named.map(regRow).join("") + "</tbody></table></div>");
 }
 
 // Per registration type, its primary (type-specific) admission fee. A fee
@@ -502,17 +555,21 @@ function primaryFeeForType(bundle) {
 // keep their per-row "by <date>". Columns sort on header tap. The blank
 // placeholder type is skipped; a type with no fee shows "—" (sorts last).
 function pricingCard(bundle, currency) {
+  const code = bundle.code || "";
   const rts = Array.isArray(bundle.registrationTypes) ? bundle.registrationTypes : [];
+  const cur = (bundle.event && bundle.event.currency) || currency || "";
+  const curBadge = cur ? ' <span class="badge badge-slate">' + esc(cur) + "</span>" : "";
   if (!rts.length || !(Array.isArray(bundle.feeItems) && bundle.feeItems.length)) {
-    return card(sectionTitle("Pricing") + '<div class="empty-state"><div class="hint">No pricing</div></div>');
+    return collapsibleCard(code, "pricing", "Pricing", curBadge,
+      '<div class="empty-state"><div class="hint">No pricing</div></div>');
   }
   const primaryFee = primaryFeeForType(bundle);
   // State the currency once (fees all share the event currency); cells then
   // show bare numbers so three columns fit a phone.
-  const cur = (bundle.event && bundle.event.currency) || currency || "";
   const named = rts.filter((t) => t.name || t.code); // skip blank placeholder
   if (!named.length) {
-    return card(sectionTitle("Pricing") + '<div class="empty-state"><div class="hint">No pricing</div></div>');
+    return collapsibleCard(code, "pricing", "Pricing", curBadge,
+      '<div class="empty-state"><div class="hint">No pricing</div></div>');
   }
   // Resolve each type's fee/early-bird once; detect a uniform deadline.
   const data = named.map((t) => {
@@ -545,16 +602,14 @@ function pricingCard(bundle, currency) {
   const note = uniformDate
     ? '<div class="muted-line">Early bird through ' + esc(fmtDate(uniformDate)) + "</div>"
     : "";
-  return (
-    card(sectionTitle("Pricing", cur ? ' <span class="badge badge-slate">' + esc(cur) + "</span>" : "") +
+  return collapsibleCard(code, "pricing", "Pricing", curBadge,
     note +
     '<div class="tbl-wrap"><table class="tbl sortable"><thead><tr>' +
     sortableTh("Registration type") +
     sortableTh("Standard", true) + sortableTh("Early bird", true) +
     "</tr></thead><tbody>" +
     body +
-    "</tbody></table></div>")
-  );
+    "</tbody></table></div>");
 }
 
 // Status badge from the payment row's own status (server: paid/partial/
@@ -575,7 +630,7 @@ function orderStatusBadge(o) {
 // Payments card: totals (ordered/paid/due/refunded) + order table capped at
 // 20 rows with a "Show all (N)" expander; zero orders → empty state; a
 // non-empty cancelled array is a muted count line, never tabulated.
-function paymentsCard(payments, currency) {
+function paymentsCard(code, payments, currency) {
   const t = (payments && payments.totals) || {};
   const totals =
     '<table class="tbl"><tbody>' +
@@ -615,21 +670,23 @@ function paymentsCard(payments, currency) {
     ? '<div class="muted-line">' +
       esc(cancelled.length) + " cancelled orders</div>"
     : "";
-  return card(sectionTitle("Payments") + totals + body + cancelledLine);
+  return collapsibleCard(code, "payments", "Payments", "", totals + body + cancelledLine);
 }
 
 // Program card: sessions count + speakers (name, affiliation) capped at 50
 // with a "Show all (N)" expander; nothing at all → empty state.
 function programCard(bundle) {
+  const code = bundle.code || "";
   const sessions = Array.isArray(bundle.sessions) ? bundle.sessions : [];
   const speakers = Array.isArray(bundle.speakers) ? bundle.speakers : [];
   const countBadge =
     ' <span class="badge badge-slate">' + esc(sessions.length) +
     " sessions · " + esc(speakers.length) + " speakers</span>";
   if (!sessions.length && !speakers.length) {
-    return card(sectionTitle("Program") + '<div class="empty-state"><div class="hint">No program yet</div></div>');
+    return collapsibleCard(code, "program", "Program", countBadge,
+      '<div class="empty-state"><div class="hint">No program yet</div></div>');
   }
-  let inner = sectionTitle("Program", countBadge);
+  let body = "";
   const CAP = 50;
   const rows = speakers.map((s) => {
     const name = [s.firstName, s.middleName, s.lastName].filter(Boolean).join(" ");
@@ -638,7 +695,7 @@ function programCard(bundle) {
   if (rows.length) {
     const visible = rows.slice(0, CAP).join("");
     const rest = rows.slice(CAP);
-    inner +=
+    body +=
       '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Name</th><th>Affiliation</th></tr></thead><tbody>' +
       visible + "</tbody>" +
       (rest.length
@@ -649,8 +706,12 @@ function programCard(bundle) {
         ? '<button class="expander" data-expand type="button">Show all (' +
           esc(rows.length) + ")</button>"
         : "");
+  } else {
+    // Sessions exist but no speakers: the badge carries the count, the body
+    // explains there is no per-session list.
+    body += '<div class="empty-state"><div class="hint">Session list not available</div></div>';
   }
-  return card(inner);
+  return collapsibleCard(code, "program", "Program", countBadge, body);
 }
 
 function dashboardHtml(bundle, payments) {
@@ -663,7 +724,7 @@ function dashboardHtml(bundle, payments) {
     headerCard(bundle) +
     registrationsCard(bundle) +
     pricingCard(bundle, currency) +
-    paymentsCard(payments, currency) +
+    paymentsCard(bundle.code || "", payments, currency) +
     programCard(bundle)
   );
 }
@@ -672,7 +733,19 @@ function dashboardHtml(bundle, payments) {
 // hidden rows in place, and sortable tables (Registrations, Pricing) sort
 // their rows on header tap — asc → desc → original order. (Refresh is a
 // topbar control — app.js — so there is nothing view-local for repulls.)
-function wireDashboard(mount) {
+function wireDashboard(mount, code) {
+  // Collapsible sections: the section head is the toggle. Toggling flips the
+  // card's .collapsed class (CSS hides .sec-body), syncs aria-expanded,
+  // rotates the chevron, and persists per-event in localStorage.
+  mount.querySelectorAll(".sec-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const cardEl = btn.closest(".sec-card");
+      if (!cardEl) return;
+      const collapsed = cardEl.classList.toggle("collapsed");
+      btn.setAttribute("aria-expanded", String(!collapsed));
+      setSecCollapsed(code || "", btn.getAttribute("data-sec"), collapsed);
+    });
+  });
   mount.querySelectorAll("[data-expand]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const scope = btn.closest(".card") || mount;
@@ -808,7 +881,7 @@ function loadHome(mount, code) {
   Promise.all([getEvent(code), getPayments(code)])
     .then(([bundle, payments]) => {
       mount.innerHTML = dashboardHtml(bundle, payments);
-      wireDashboard(mount);
+      wireDashboard(mount, code);
     })
     .catch((e) => {
       const msg = (e && e.message) ? e.message : "unknown error";
