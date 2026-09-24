@@ -16,7 +16,7 @@
  * Bump "v1" to force a full re-precache on next activate.
  */
 
-const STATIC_CACHE = "cvent-data-v11";
+const STATIC_CACHE = "cvent-data-v12";
 const API_CACHE = "cvent-data-api-v1";
 const META_CACHE = "cvent-data-api-meta";
 const OFFLINE_CHANNEL = "cvent-data";

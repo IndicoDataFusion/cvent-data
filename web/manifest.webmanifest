@@ -1,7 +1,7 @@
 {
-  "name": "Cvent Data",
-  "short_name": "Cvent",
-  "description": "Cvent event data — registrations, pricing, payments, attendees, check-in.",
+  "name": "Event Data",
+  "short_name": "Events",
+  "description": "Event data — registrations, pricing, payments, attendees, check-in.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
