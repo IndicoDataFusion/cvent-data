@@ -8,9 +8,9 @@ One file, stdlib only. Two jobs:
    works for the mock AND later for static mode:
 
      DIR/index.json                     [ {code, title, start, end, pulledAt} ]
-     DIR/syn-event/event.json           the event object
-     DIR/syn-event/meta.json            {code, pulledAt, counts}
-     DIR/syn-event/<12 resource files>  raw JSON arrays (literal null when
+     DIR/<code>/event.json              the event object
+     DIR/<code>/meta.json               {code, pulledAt, counts}
+     DIR/<code>/<12 resource files>     raw JSON arrays (literal null when
                                         empty — matches server/dump.go)
 
 2. Mock Cvent API: `python3 make_fixture.py --out DIR --serve PORT` (blocks).
@@ -20,6 +20,12 @@ One file, stdlib only. Two jobs:
    every request returns the same fixture data regardless of order. Each
    request path is logged to stderr (test_server.sh greps it to prove no
    request ever reaches the real api-platform.cvent.com host).
+
+The fixture holds TWO events so the multi-event API (event-scoped routes +
+the /api/cvent/events catalog) is exercised end to end:
+  syn-event     the original synthetic event (ground truth below)
+  syn-event-2   a second, smaller event (1 attendee, 1 paid order) — the
+                mock resolves it by code and serves its own resources
 
 Fixture ground truth (the payments test hardcodes these — keep in sync):
   orders:      o1 paid    100.00/100.00/due 0.00   (att-001, via order.attendee.id)
@@ -34,12 +40,11 @@ Fixture ground truth (the payments test hardcodes these — keep in sync):
 import argparse
 import json
 import os
+import re
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-EVENT_CODE = "syn-event"
-EVENT_UUID = "00000000-1111-4222-8333-000000000001"
 PULLED_AT = "2026-09-22T00:00:00Z"
 
 # Resource names exactly as server/event.go names them (bundle key == counts
@@ -68,11 +73,11 @@ RESOURCE_FILES = {
 }
 
 
-def _event():
+def _event(code, uuid, title):
     return {
-        "id": EVENT_UUID,
-        "title": "Synthetic Test Event",
-        "code": EVENT_CODE,
+        "id": uuid,
+        "title": title,
+        "code": code,
         "virtual": False,
         "format": "In-person",
         "start": "2027-05-23T12:00:00.000Z",
@@ -89,7 +94,7 @@ def _event():
     }
 
 
-def _attendee(aid, first, last, conf, email=None, placement="name"):
+def _attendee(uuid, title, aid, first, last, conf, email=None, placement="name"):
     """One attendee row. `placement` varies WHERE the name parts live, to
     exercise server/handlers.go's lenient name resolution (name object ->
     top-level -> contact). contact.email is present for 2 attendees."""
@@ -97,7 +102,7 @@ def _attendee(aid, first, last, conf, email=None, placement="name"):
         "id": aid,
         "confirmationNumber": conf,
         "checkedIn": False,
-        "event": {"id": EVENT_UUID, "name": "Synthetic Test Event"},
+        "event": {"id": uuid, "name": title},
         "registrationPath": {"id": "rt-1", "name": "General Admission"},
     }
     parts = {"firstName": first, "lastName": last}
@@ -112,20 +117,22 @@ def _attendee(aid, first, last, conf, email=None, placement="name"):
     return a
 
 
-def _build_resources():
-    """The 12 bundle resources as plain Python lists (the mock's replay data
-    and the dump's on-disk arrays)."""
+def _build_syn_event():
+    """The original synthetic event's 12 resources (ground truth in the
+    module docstring)."""
+    uuid = "00000000-1111-4222-8333-000000000001"
+    title = "Synthetic Test Event"
     attendees = [
-        _attendee("att-001", "Alice", "Zetar", "CONF-0001"),
-        _attendee("att-002", "Bob", "Smith", "CONF-0002",
+        _attendee(uuid, title, "att-001", "Alice", "Zetar", "CONF-0001"),
+        _attendee(uuid, title, "att-002", "Bob", "Smith", "CONF-0002",
                   email="zeta@example.org", placement="top"),
-        _attendee("att-003", "Carol", "Jones", "CONF-0003",
+        _attendee(uuid, title, "att-003", "Carol", "Jones", "CONF-0003",
                   email="carol@example.org", placement="contact"),
-        _attendee("att-004", "Dan", "Okafor", "CONF-0004"),
-        _attendee("att-005", "Erin", "Kowalski", "CONF-0005"),
+        _attendee(uuid, title, "att-004", "Dan", "Okafor", "CONF-0004"),
+        _attendee(uuid, title, "att-005", "Erin", "Kowalski", "CONF-0005"),
     ]
 
-    ev = {"id": EVENT_UUID}
+    ev = {"id": uuid}
     orders = [
         # paid: due 0 -> status "paid"; id via order.attendee.id
         {
@@ -187,7 +194,7 @@ def _build_resources():
         return {
             "id": rid, "name": name, "code": code, "description": name,
             "virtual": False, "openForRegistration": True,
-            "event": {"id": EVENT_UUID},
+            "event": {"id": uuid},
             "capacity": {"remaining": -1, "consumed": 0, "total": -1},
         }
 
@@ -197,7 +204,7 @@ def _build_resources():
     def adm(aid, name):
         return {
             "id": aid, "name": name, "code": name, "description": name,
-            "event": {"id": EVENT_UUID},
+            "event": {"id": uuid},
         }
 
     admission_items = [adm("adm-1", "Standard Badge"), adm("adm-2", "VIP Badge")]
@@ -250,6 +257,102 @@ def _build_resources():
     }
 
 
+def _build_syn_event_2():
+    """A second, smaller event: 1 attendee, 1 fully-paid order, 1 session,
+    1 speaker. Exercises the event-scoped routes with DIFFERENT data so a
+    test that accidentally reads the wrong event's bundle fails loudly."""
+    uuid = "00000000-2222-4333-8444-000000000002"
+    title = "Synthetic Test Event 2"
+    ev = {"id": uuid}
+    attendees = [
+        _attendee(uuid, title, "att-201", "Frank", "Grant", "CONF-2001"),
+    ]
+    orders = [
+        {
+            "id": "ord-21", "invoiceNumber": "INV-2001", "type": "Registration",
+            "attendee": {"id": "att-201"},
+            "amountOrdered": 400.0, "amountPaid": 400.0, "amountDue": 0.0,
+            "paymentMethod": "CREDIT_CARD", "cancelled": False, "event": ev,
+        },
+    ]
+    order_items = [
+        {
+            "id": "oi-21", "order": {"id": "ord-21"}, "name": "VIP Pass",
+            "amount": 400.0, "currency": "USD",
+            "admissionItem": {"id": "adm-21", "name": "VIP Pass"},
+            "event": ev,
+        },
+    ]
+    transactions = [
+        {"id": "txn-21", "success": True, "paymentType": "CreditCard",
+         "type": "PURCHASE", "amount": 400.0,
+         "order": {"id": "ord-21"}, "event": ev},
+    ]
+    transaction_items = [
+        {"id": "ti-21", "transaction": {"id": "txn-21"}, "name": "VIP Pass",
+         "amount": 400.0, "currency": "USD", "event": ev},
+    ]
+    registration_types = [{
+        "id": "rt-21", "name": "VIP", "code": "VIP", "description": "VIP",
+        "virtual": False, "openForRegistration": True,
+        "event": {"id": uuid},
+        "capacity": {"remaining": -1, "consumed": 0, "total": -1},
+    }]
+    admission_items = [{
+        "id": "adm-21", "name": "VIP Pass", "code": "VIP Pass",
+        "description": "VIP Pass", "event": {"id": uuid},
+    }]
+    fee_items = [{
+        "id": "fee-21", "name": "VIP Rate", "amount": 400.0, "currency": "USD",
+        "product": {"id": "adm-21", "type": "AdmissionItem", "name": "VIP Pass"},
+        "active": True, "default": False,
+        "created": "2026-09-01T00:00:00Z",
+    }]
+    discounts = []
+    sessions = [{
+        "id": "ses-21", "name": "Sponsor Mixer", "type": "Regular",
+        "start": "2027-05-24T13:00:00.000Z", "end": "2027-05-24T15:00:00.000Z",
+        "event": ev,
+    }]
+    speakers = [{
+        "id": "spk-21", "name": "Dr. Second Speaker", "affiliation": "Other U",
+        "event": ev,
+    }]
+    return {
+        "attendees": attendees,
+        "activities": [],
+        "orders": orders,
+        "orderItems": order_items,
+        "transactions": transactions,
+        "transactionItems": transaction_items,
+        "feeItems": fee_items,
+        "admissionItems": admission_items,
+        "registrationTypes": registration_types,
+        "discounts": discounts,
+        "sessions": sessions,
+        "speakers": speakers,
+    }
+
+
+# code -> (event object, resources dict). The mock and the dump both read
+# from this single source of truth.
+EVENTS = {
+    "syn-event": (
+        _event("syn-event", "00000000-1111-4222-8333-000000000001",
+               "Synthetic Test Event"),
+        _build_syn_event(),
+    ),
+    "syn-event-2": (
+        _event("syn-event-2", "00000000-2222-4333-8444-000000000002",
+               "Synthetic Test Event 2"),
+        _build_syn_event_2(),
+    ),
+}
+
+# uuid -> code (inverse map for the mock's per-uuid resource routes).
+UUID_TO_CODE = {ev["id"]: code for code, (ev, _res) in EVENTS.items()}
+
+
 def _counts(resources):
     return {k: len(v) for k, v in resources.items()}
 
@@ -257,36 +360,40 @@ def _counts(resources):
 # --- dump layout (matches server/dump.go) -----------------------------------
 
 def write_dump(out_dir):
-    event = _event()
-    resources = _build_resources()
-    counts = _counts(resources)
-    code_dir = os.path.join(out_dir, EVENT_CODE)
-    os.makedirs(code_dir, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
+    index = []
+    for code, (event, resources) in EVENTS.items():
+        counts = _counts(resources)
+        code_dir = os.path.join(out_dir, code)
+        os.makedirs(code_dir, exist_ok=True)
 
-    def write(name, data):
-        # `data` is either a Python object (serialized) or a pre-built string
-        # (e.g. the literal "null" for empty resources — Go parity).
-        text = data if isinstance(data, str) else json.dumps(data, indent=1)
-        if not text.endswith("\n"):
-            text += "\n"
-        with open(os.path.join(code_dir, name), "w") as f:
-            f.write(text)
+        def write(name, data, _code_dir=code_dir):
+            # `data` is either a Python object (serialized) or a pre-built
+            # string (e.g. the literal "null" for empty resources — Go parity).
+            text = data if isinstance(data, str) else json.dumps(data, indent=1)
+            if not text.endswith("\n"):
+                text += "\n"
+            with open(os.path.join(_code_dir, name), "w") as f:
+                f.write(text)
 
-    write("event.json", event)
-    # one file per resource: raw array, or literal null when empty (Go parity)
-    for key in RESOURCE_KEYS:
-        rows = resources[key]
-        write(RESOURCE_FILES[key], rows if rows else "null")
-    write("meta.json", json.dumps(
-        {"code": EVENT_CODE, "pulledAt": PULLED_AT, "counts": counts}, indent=2))
+        write("event.json", event)
+        # one file per resource: raw array, or literal null when empty
+        for key in RESOURCE_KEYS:
+            rows = resources[key]
+            write(RESOURCE_FILES[key], rows if rows else "null")
+        write("meta.json", json.dumps(
+            {"code": code, "pulledAt": PULLED_AT, "counts": counts}, indent=2))
 
-    index = [{
-        "code": EVENT_CODE,
-        "title": event["title"],
-        "start": event["start"],
-        "end": event["end"],
-        "pulledAt": PULLED_AT,
-    }]
+        index.append({
+            "code": code,
+            "title": event["title"],
+            "start": event["start"],
+            "end": event["end"],
+            "pulledAt": PULLED_AT,
+        })
+
+    # sort by start date, then title (matches server/dump.go's upsert order)
+    index.sort(key=lambda e: (e["start"], e["title"]))
     with open(os.path.join(out_dir, "index.json"), "w") as f:
         json.dump(index, f, indent=2)
         f.write("\n")
@@ -303,9 +410,15 @@ def _page(items):
     }
 
 
-def make_handler(resources):
-    event = _event()
+_UUID_RE = re.compile(r"event\.id eq '([0-9a-fA-F-]+)'")
 
+
+def _resources_for_uuid(uuid):
+    code = UUID_TO_CODE.get(uuid)
+    return EVENTS[code][1] if code is not None else None
+
+
+def make_handler():
     class MockCvent(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -325,32 +438,35 @@ def make_handler(resources):
         def _not_found(self):
             self._send({"error": "mock: no such endpoint: %s" % self.path}, 404)
 
-        def do_POST(self):
-            parsed = urlparse(self.path)
-            path = parsed.path
-            # drain the body so keep-alive framing stays clean
+        def _drain_body(self):
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 if n:
-                    self.rfile.read(n)
+                    return self.rfile.read(n).decode()
             except (ValueError, OSError):
                 pass
+            return ""
+
+        def do_POST(self):
+            path = urlparse(self.path).path
+            body = self._drain_body()  # keep-alive framing stays clean
             if path == "/oauth2/token":
                 # accept any Basic auth (the test uses test:***
                 self._send({"access_token": "mock-token", "token_type": "bearer",
                             "expires_in": 3600})
                 return
-            if path == "/admission-items/filter":
-                self._send(_page(resources["admissionItems"]))
-                return
-            if path == "/sessions/filter":
-                self._send(_page(resources["sessions"]))
-                return
-            if path == "/speakers/filter":
-                self._send(_page(resources["speakers"]))
-                return
-            if path == "/attendees/filter":
-                self._send(_page(resources["attendees"]))
+            # The filter endpoints carry the event uuid in the JSON body
+            # ("event.id eq '<uuid>'"); recover it to pick the right event.
+            m = _UUID_RE.search(body)
+            res = _resources_for_uuid(m.group(1)) if m else None
+            table = {
+                "/admission-items/filter": "admissionItems",
+                "/sessions/filter": "sessions",
+                "/speakers/filter": "speakers",
+                "/attendees/filter": "attendees",
+            }
+            if path in table:
+                self._send(_page(res[table[path]] if res else []))
                 return
             self._not_found()
 
@@ -361,35 +477,35 @@ def make_handler(resources):
                 # code -> uuid resolution: single-page list, first item wins.
                 # The Go client sends filter=code eq '<code>'&limit=200.
                 filt = (q.get("filter") or [""])[0]
-                if ("code eq '%s'" % EVENT_CODE) in filt:
-                    self._send(_page([event]))
-                else:
-                    self._send(_page([]))
+                matched = [ev for code, (ev, _res) in EVENTS.items()
+                           if ("code eq '%s'" % code) in filt]
+                self._send(_page(matched))
                 return
-            if path == "/events/%s/registration-types" % EVENT_UUID:
-                self._send(_page(resources["registrationTypes"]))
-                return
-            if path == "/events/%s/fee-items" % EVENT_UUID:
-                self._send(_page(resources["feeItems"]))
-                return
-            if path == "/events/%s/discounts" % EVENT_UUID:
-                self._send(_page(resources["discounts"]))
-                return
-            if path == "/events/%s/orders" % EVENT_UUID:
-                self._send(_page(resources["orders"]))
-                return
-            if path == "/events/%s/orders/items" % EVENT_UUID:
-                self._send(_page(resources["orderItems"]))
-                return
-            if path == "/events/%s/transactions" % EVENT_UUID:
-                self._send(_page(resources["transactions"]))
-                return
-            if path == "/events/%s/transactions/items" % EVENT_UUID:
-                self._send(_page(resources["transactionItems"]))
-                return
+            # per-uuid resource routes: /events/<uuid>/<resource>
+            m = re.match(r"^/events/([0-9a-fA-F-]+)/(.+)$", path)
+            if m:
+                res = _resources_for_uuid(m.group(1))
+                if res is None:
+                    self._not_found()
+                    return
+                table = {
+                    "registration-types": "registrationTypes",
+                    "fee-items": "feeItems",
+                    "discounts": "discounts",
+                    "orders": "orders",
+                    "orders/items": "orderItems",
+                    "transactions": "transactions",
+                    "transactions/items": "transactionItems",
+                }
+                if m.group(2) in table:
+                    self._send(_page(res[table[m.group(2)]]))
+                    return
             if path == "/attendees/activities":
                 # filter arrives as a QUERY PARAM here (not a POST body)
-                self._send(_page(resources["activities"]))
+                filt = (q.get("filter") or [""])[0]
+                mm = _UUID_RE.search(filt)
+                res = _resources_for_uuid(mm.group(1)) if mm else None
+                self._send(_page(res["activities"] if res else []))
                 return
             self._not_found()
 
@@ -397,10 +513,9 @@ def make_handler(resources):
 
 
 def serve(port):
-    resources = _build_resources()
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(resources))
-    sys.stderr.write("mock cvent upstream listening on 127.0.0.1:%d (event %s)\n"
-                     % (port, EVENT_CODE))
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler())
+    sys.stderr.write("mock cvent upstream listening on 127.0.0.1:%d (events %s)\n"
+                     % (port, ", ".join(EVENTS)))
     sys.stderr.flush()
     try:
         httpd.serve_forever()
@@ -416,8 +531,8 @@ def main():
 
     if args.out:
         write_dump(args.out)
-        sys.stderr.write("fixture written to %s/%s/ (+index.json)\n"
-                         % (args.out, EVENT_CODE))
+        sys.stderr.write("fixture written to %s/ (%s events +index.json)\n"
+                         % (args.out, ", ".join(EVENTS)))
     if args.serve:
         serve(args.serve)
     if not args.out and not args.serve:

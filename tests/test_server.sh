@@ -135,8 +135,8 @@ assert d.get("ok") is True, f"ok != true: {d}"
 PY
 
 # --- 2. bundle: fan-out end-to-end against the mock ---------------------------
-code=$(curl -s -o "$WORK/bundle.json" -w '%{http_code}' "$BASE/api/cvent/event")
-[ "$code" = "200" ]; check $? "/api/cvent/event -> 200 (got $code)"
+code=$(curl -s -o "$WORK/bundle.json" -w '%{http_code}' "$BASE/api/cvent/events/syn-event")
+[ "$code" = "200" ]; check $? "/api/cvent/events/syn-event -> 200 (got $code)"
 python3 - "$WORK/bundle.json" <<'PY' && pass "bundle: 12 count keys, attendees=5, title ok" \
   || die "bundle payload wrong"
 import json, sys
@@ -159,8 +159,8 @@ for k, n in [("orders", 3), ("transactions", 3), ("feeItems", 2),
 PY
 
 # --- 3. payments ---------------------------------------------------------------
-code=$(curl -s -o "$WORK/pay.json" -w '%{http_code}' "$BASE/api/cvent/event/payments")
-[ "$code" = "200" ]; check $? "/api/cvent/event/payments -> 200 (got $code)"
+code=$(curl -s -o "$WORK/pay.json" -w '%{http_code}' "$BASE/api/cvent/events/syn-event/payments")
+[ "$code" = "200" ]; check $? "/api/cvent/events/syn-event/payments -> 200 (got $code)"
 python3 - "$WORK/pay.json" "$EXPECTED_TOTALS" <<'PY' && pass "payments: totals + rows exact" \
   || die "payments payload wrong"
 import json, sys
@@ -184,8 +184,8 @@ PY
 
 # --- 4./5. attendee search -----------------------------------------------------
 code=$(curl -s -o "$WORK/att_zeta.json" -w '%{http_code}' \
-  "$BASE/api/cvent/event/attendees?q=zeta")
-[ "$code" = "200" ]; check $? "/api/cvent/event/attendees?q=zeta -> 200 (got $code)"
+  "$BASE/api/cvent/events/syn-event/attendees?q=zeta")
+[ "$code" = "200" ]; check $? "/api/cvent/events/syn-event/attendees?q=zeta -> 200 (got $code)"
 python3 - "$WORK/att_zeta.json" <<'PY' && pass "q=zeta -> total 2, items 2" || die "q=zeta wrong"
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -199,7 +199,7 @@ assert ids == ["att-001", "att-002"], ids
 PY
 
 code=$(curl -s -o "$WORK/att_nomatch.json" -w '%{http_code}' \
-  "$BASE/api/cvent/event/attendees?q=zzz-no-match")
+  "$BASE/api/cvent/events/syn-event/attendees?q=zzz-no-match")
 [ "$code" = "200" ]; check $? "attendees?q=zzz-no-match -> 200 (got $code)"
 python3 - "$WORK/att_nomatch.json" <<'PY' && pass "q=zzz-no-match -> total 0, items []" \
   || die "no-match search wrong"
@@ -210,7 +210,7 @@ assert d["items"] == [], f"items != []: {d['items']}"
 PY
 
 # --- 6. repull-status -----------------------------------------------------------
-code=$(curl -s -o "$WORK/repull.json" -w '%{http_code}' "$BASE/api/cvent/event/repull-status")
+code=$(curl -s -o "$WORK/repull.json" -w '%{http_code}' "$BASE/api/cvent/events/syn-event/repull-status")
 [ "$code" = "200" ]; check $? "repull-status -> 200 (got $code)"
 python3 - "$WORK/repull.json" <<'PY' && pass "repull-status: running=false, pulledAt set" \
   || die "repull-status wrong"
@@ -218,6 +218,50 @@ import json, sys
 d = json.load(open(sys.argv[1]))
 assert d["running"] is False, d
 assert d["pulledAt"] is not None and d["pulledAt"] != "", "pulledAt null (bundle never fetched?)"
+PY
+
+# --- 6b. catalog: /api/cvent/events lists both fixture events --------------------
+code=$(curl -s -o "$WORK/catalog.json" -w '%{http_code}' "$BASE/api/cvent/events")
+[ "$code" = "200" ]; check $? "/api/cvent/events -> 200 (got $code)"
+python3 - "$WORK/catalog.json" <<'PY' && pass "catalog: 2 events, default=syn-event" \
+  || die "catalog payload wrong"
+import json, sys
+d = json.load(open(sys.argv[1]))
+codes = sorted(e["code"] for e in d["events"])
+assert codes == ["syn-event", "syn-event-2"], f"catalog codes {codes}"
+assert d["default"] == "syn-event", d
+PY
+
+# --- 6c. second event: event-scoped routes serve THAT event's data ---------------
+# Guards against the single-event assumption leaking back: syn-event-2 has
+# 1 attendee / 1 paid order (400.00) — distinct from syn-event's 5 / 3.
+code=$(curl -s -o "$WORK/bundle2.json" -w '%{http_code}' "$BASE/api/cvent/events/syn-event-2")
+[ "$code" = "200" ]; check $? "/api/cvent/events/syn-event-2 -> 200 (got $code)"
+python3 - "$WORK/bundle2.json" <<'PY' && pass "syn-event-2 bundle: title + counts distinct" \
+  || die "syn-event-2 bundle wrong"
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d["code"] == "syn-event-2", d.get("code")
+assert d["event"]["title"] == "Synthetic Test Event 2", d["event"].get("title")
+c = d["counts"]
+assert c["attendees"] == 1 and c["orders"] == 1, f"counts {c}"
+PY
+code=$(curl -s -o "$WORK/pay2.json" -w '%{http_code}' "$BASE/api/cvent/events/syn-event-2/payments")
+[ "$code" = "200" ]; check $? "syn-event-2 payments -> 200 (got $code)"
+python3 - "$WORK/pay2.json" <<'PY' && pass "syn-event-2 payments: 1 order, ordered 400.00" \
+  || die "syn-event-2 payments wrong"
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d["totals"] == {"ordered": 400.0, "paid": 400.0, "due": 0.0, "refunded": 0.0}, d["totals"]
+assert len(d["orders"]) == 1 and d["orders"][0]["attendee"] == "Frank Grant", d["orders"]
+PY
+code=$(curl -s -o "$WORK/att2.json" -w '%{http_code}' "$BASE/api/cvent/events/syn-event-2/attendees?q=frank")
+[ "$code" = "200" ]; check $? "syn-event-2 attendees?q=frank -> 200 (got $code)"
+python3 - "$WORK/att2.json" <<'PY' && pass "syn-event-2 q=frank -> total 1 (Frank Grant)" \
+  || die "syn-event-2 attendee search wrong"
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d["total"] == 1 and d["items"][0]["id"] == "att-201", d
 PY
 
 # --- 7. unknown /api source ------------------------------------------------------
@@ -249,12 +293,12 @@ grep -q 'not found' "$WORK/data_missing.json" \
 
 code=$(curl -s -o "$WORK/data_index.json" -w '%{http_code}' "$BASE/data/index.json")
 [ "$code" = "200" ]; check $? "/data/index.json -> 200 (got $code)"
-python3 - "$WORK/data_index.json" <<'PY' && pass "/data/index.json is the fixture dump index (JSON array)" \
+python3 - "$WORK/data_index.json" <<'PY' && pass "/data/index.json is the fixture dump index (2 events)" \
   || die "/data/index.json wrong"
 import json, sys
 d = json.load(open(sys.argv[1]))
-assert isinstance(d, list) and len(d) == 1, f"expected 1-entry array: {d}"
-assert d[0]["code"] == "syn-event", d
+assert isinstance(d, list) and len(d) == 2, f"expected 2-entry array: {d}"
+assert sorted(e["code"] for e in d) == ["syn-event", "syn-event-2"], d
 PY
 
 # --- offline proof: the mock log contains only local paths -------------------------
@@ -281,8 +325,8 @@ wait_http "http://127.0.0.1:$DEAD_PORT/api/health" 5 \
 # The 20 s fan-out timeout (event.go) bounds this; allow 25 s. Connection
 # refusals fail faster, but the bound must hold even for a black-holing host.
 code=$(curl -s -o "$WORK/dead_event.json" -w '%{http_code}' --max-time 25 \
-  "http://127.0.0.1:$DEAD_PORT/api/cvent/event")
-[ "$code" = "502" ]; check $? "dead upstream: /api/cvent/event -> 502 within 25 s (got $code)"
+  "http://127.0.0.1:$DEAD_PORT/api/cvent/events/syn-event")
+[ "$code" = "502" ]; check $? "dead upstream: /api/cvent/events/syn-event -> 502 within 25 s (got $code)"
 grep -q '"error"' "$WORK/dead_event.json" \
   && pass "dead upstream: 502 body is JSON with an error message" \
   || die "dead upstream 502 body not JSON: $(cat "$WORK/dead_event.json")"
