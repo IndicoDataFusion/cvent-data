@@ -78,9 +78,7 @@
     if (!btn) return;
     var m = root.dataset.theme || "default";
     var icon = btn.querySelector(".topbar-btn-icon");
-    var label = document.getElementById("theme-label");
     if (icon) icon.innerHTML = ICONS[m];
-    if (label) label.textContent = LABELS[m];
     btn.setAttribute("aria-label", "Theme: " + LABELS[m] + " (tap to change)");
     btn.title = "Theme: " + LABELS[m];
   }

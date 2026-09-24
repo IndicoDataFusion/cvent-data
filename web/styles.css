@@ -227,9 +227,6 @@ button { font: inherit; cursor: pointer; }
   flex: 0 0 auto;
 }
 .topbar-btn-icon svg { width: 18px; height: 18px; display: block; }
-/* Fixed label width so Auto/Light/Dark never shift the button (zero layout
-   shift across theme modes). */
-.topbar-btn-label { display: inline-block; min-width: 36px; text-align: left; }
 
 /* ================= topbar event selector =================
    A compact dropdown that mirrors the route's event and jumps between
