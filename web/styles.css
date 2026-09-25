@@ -40,7 +40,7 @@
   --text: #1c2620;
   --muted: #5a6e65;
   --dim: #5f7168;
-  --accent: #0e7252;
+  --accent: #0f7a58;
   --accent2: #7d5805;
   --entree: #b23929;
   --chip: #e9efeb;
@@ -98,9 +98,9 @@ html[data-theme="dark"] {
 
   /* button text on the accent fill (dark mode: white on #35c28f is 2.27:1,
      below WCAG AA; dark forest on the same green is ~7.3:1) */
-  --on-accent: #04231a;
+  --on-accent: #06231a;
 
-  --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 1px 3px rgba(0, 0, 0, .4);
+  --shadow: 0 1px 2px rgba(0, 0, 0, .16);
 }
 
 /* ---------- forest dark (OS default mode) ---------- */
@@ -126,9 +126,9 @@ html[data-theme="dark"] {
     --offline-text: #ffd166;
     --offline-border: #514014;
 
-    --on-accent: #04231a;
+    --on-accent: #06231a;
 
-    --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 1px 3px rgba(0, 0, 0, .4);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .16);
   }
 }
 
@@ -288,13 +288,14 @@ button { font: inherit; cursor: pointer; }
 @media (max-width: 420px) {
   .event-select-label { display: none; }
   .event-select-wrap { padding: 0 2px; }
-  .event-select { max-width: 116px; }
+  .event-select { max-width: 100px; }
 }
 
 /* ================= view tab bar =================
    A slim, sticky bar under the topbar that switches the per-event views
-   (Overview / Attendees). Sticky just below the 64px topbar (plus the
-   safe-area inset) so it stays reachable while scrolling long views. */
+   (Overview / Attendees). It IS the house-style segmented control (.seg):
+   an opaque panel box with a 1px line border and 3px inset, the active tab
+   filled with --chip-active. The green accent is reserved for data. */
 .view-tabs {
   position: sticky;
   top: calc(var(--safe-top) + 64px);
@@ -302,36 +303,39 @@ button { font: inherit; cursor: pointer; }
   max-width: 720px;
   margin: 0 auto;
   display: flex;
-  gap: 4px;
-  padding: 6px 12px 0;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
 }
+/* House-style segmented control (.seg): the active tab is the inset
+   --chip-active fill — the green accent is reserved for data highlights. */
 .view-tab {
   flex: 1 1 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 38px;
+  height: 34px;
   padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel);
+  border: none;
+  border-radius: 8px;
+  background: transparent;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
   text-decoration: none;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: background .15s ease, color .15s ease, border-color .15s ease;
+  transition: background .15s ease, color .15s ease, transform .05s ease;
 }
+.view-tab:hover { color: var(--text); background: color-mix(in srgb, var(--chip-active) 45%, transparent); }
 .view-tab:active { transform: translateY(1px); }
 .view-tab.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
+  background: var(--chip-active);
+  color: var(--text);
+  font-weight: 600;
 }
 .view-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -580,32 +584,34 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
   gap: 8px;
   width: 100%;
   margin: 0;
-  padding: 10px 8px 10px 10px;
+  padding: 2px 4px 2px 10px;
   border: none;
   border-left: 3px solid var(--accent);
-  border-radius: 8px;
   background: transparent;
-  font: inherit;
   color: var(--accent);
   text-align: left;
   cursor: pointer;
-  transition: background .15s ease;
+  transition: color .15s ease;
 }
-.section-head.sec-toggle:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
-.section-head.sec-toggle:active { transform: translateY(1px); }
+/* House-style .cat-head hover: the label goes to --text, no background. */
+.section-head.sec-toggle:hover { color: var(--text); }
 /* the section-head's own margin is re-applied to the body, not the head */
 .sec-card .sec-body { margin-top: 10px; }
 .sec-card.collapsed .sec-body { display: none; }
 .sec-card.collapsed { padding-bottom: 8px; }
 .sec-card:not(.collapsed) { padding-bottom: 14px; }
-.sec-ind {
+/* Chevron: the house-style .chev — 16px SVG, dim, rotates -90° collapsed. */
+.sec-toggle .chev {
   margin-left: auto;
-  font-size: 10px;
-  color: var(--muted);
-  transition: transform .15s ease;
   flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  display: inline-flex;
+  color: var(--dim);
+  transition: transform .18s ease;
 }
-.sec-card.collapsed .sec-ind { transform: rotate(-90deg); }
+.sec-toggle .chev svg { width: 1rem; height: 1rem; display: block; }
+.sec-card.collapsed .chev { transform: rotate(-90deg); }
 /* the "Show all (N)" expander — a subtle full-width text button */
 .expander {
   width: 100%;
@@ -756,6 +762,10 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
   .tbl tbody tr::after { content: ""; position: absolute; inset: 0 -4px; }
   /* sort headers are ~28px tall — extend the hit box to 44px */
   .tbl th[data-sort]::after { content: ""; position: absolute; inset: -8px -2px; }
+  /* section heads: bigger header on touch + hit area up into card padding
+     (house-style .cat-head treatment) */
+  .sec-toggle { padding: 8px 4px 6px 10px; }
+  .sec-toggle::after { content: ""; position: absolute; inset: -10px -12px 0; }
 }
 
 /* ================= attendees view ================= */
@@ -776,13 +786,15 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
 .tbl .mono-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* sheet header: title block left, close button right */
 .sheet-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+/* Sheet close: the house-style .modal-close look — a 32px circle. */
 .sheet-close {
   display: grid;
   place-items: center;
   width: 32px;
   height: 32px;
+  padding: 0;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 50%;
   background: var(--panel);
   color: var(--muted);
   flex: 0 0 auto;
@@ -793,6 +805,24 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
 .kv-list { margin: 0; display: grid; gap: 6px; }
 .kv-list dt { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .kv-list dd { margin: 0 0 4px; font-size: 14px; overflow-wrap: anywhere; }
+
+/* ================= footer (house-style: dim centered line + build sha) ================= */
+.footer {
+  position: relative;
+  z-index: 1;
+  max-width: 720px;
+  margin: 0 auto;
+  text-align: center;
+  color: var(--dim);
+  font-size: .72rem;
+  padding: 10px 16px calc(16px + var(--safe-bottom));
+}
+.build-sha {
+  font-family: var(--mono);
+  font-size: .68rem;
+  letter-spacing: .3px;
+  margin-left: 6px;
+}
 
 /* ================= fallback loading note (theme.js) ================= */
 .loading-note { color: var(--muted); font-size: 14px; padding: 40px 0; text-align: center; }

@@ -427,15 +427,22 @@ function setSecCollapsed(code, key, collapsed) {
 }
 
 // A card whose section head toggles its body. key is the stable section
-// id ("registrations", "pricing", …) used for the persisted state.
+// id ("registrations", "pricing", …) used for the persisted state. The
+// head is the house-style .cat-head look: 3px accent rail, Space Grotesk
+// uppercase label, an SVG chevron at the right edge (dim, rotates -90°
+// when collapsed). Hover changes the label color to --text (no
+// background); there is no border-radius so the rail stays a straight
+// line.
 function collapsibleCard(code, key, label, badgeHtml, bodyHtml) {
   const collapsed = isSecCollapsed(code, key);
   return (
     '<div class="card sec-card' + (collapsed ? " collapsed" : "") + '">' +
     '<button class="section-head sec-toggle" type="button" data-sec="' + esc(key) + '"' +
     ' aria-expanded="' + String(!collapsed) + '">' +
-    escapeHtml(label) + (badgeHtml || "") +
-    '<span class="sec-ind" aria-hidden="true">&#9662;</span></button>' +
+    '<span class="sec-label">' + escapeHtml(label) + (badgeHtml || "") + "</span>" +
+    '<span class="chev" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></button>' +
     '<div class="sec-body">' + bodyHtml + "</div>" +
     "</div>"
   );
