@@ -1,12 +1,19 @@
 # cvent-data
 
-Client, tests, and reference material for the Cvent Platform REST API.
+Client, tests, and reference material for the Cvent Platform REST API, plus
+a PWA for browsing event data. Go module `github.com/zhangt58/cvent`.
 
+- `cvent/` — Go package (stdlib only): credentials, API client, event
+  bundle cache, payments join, snapshot dumps.
+- `cmd/cvent-dump/` — standalone CLI that writes event snapshots.
+- `server/` + `web/` — the Cvent Data PWA (see below).
 - `openapi.json` — full official OpenAPI 3.0.2 spec (367 endpoints), pulled
   from the Cvent developer portal. Use it as the source of truth for
   endpoints, schemas, and scopes.
 - `tests/` — bash smoke tests against the live API (see `tests/README.md`).
-- `.env` (gitignored) — `CVENT_CLIENT_ID` / `CVENT_CLIENT_SECRET`.
+- `scripts/make_icons.py` — regenerates the PWA icons in `web/icons/`.
+- `.env` (gitignored; template in `.env.example`) — `CVENT_CLIENT_ID` /
+  `CVENT_CLIENT_SECRET` and the event list `CVENT_CODE_1`, `CVENT_CODE_2`, ….
 
 ## Quick auth
 
@@ -34,7 +41,7 @@ picker lists the events in the dump catalog (`data/index.json`); the
 
 ```bash
 make serve    # build ./data-server, dump data/ if missing, serve on 127.0.0.1:8766
-make dump     # re-pull the snapshot into data/
+make dump     # re-pull every configured event's snapshot into data/
 ```
 
 Serves the app at **http://localhost:8766**. `make serve` rebuilds
@@ -50,7 +57,11 @@ repo-root `.env` (the real environment wins per key): currently
 `TESTCODE01` = CONF27 Attendees and `TESTCODE02` = CONF27 Sponsors.
 Dumps pull all of them; the first is the default selection (the `--event`
 flag always wins). With none set, a legacy `CVENT_EVENT` is used, then the
-build default `TESTCODE01`. Credentials — `CVENT_CLIENT_ID` /
+build default `TESTCODE01`. To add an event, add the next `CVENT_CODE_<n>`
+and run `make dump`; the picker lists it on the next page load (restart the
+server only to change the default). The picker shows each event's optional
+`shortName` from `data/index.json`, else its full title — set it by hand in
+that file; re-dumps preserve it. Credentials — `CVENT_CLIENT_ID` /
 `CVENT_CLIENT_SECRET` — live in the gitignored `.env`. `CVENT_API_BASE` is
 optional (default `https://api-platform.cvent.com/ea`; the EU base is
 `https://api-platform-eur.cvent.com/ea`).
@@ -80,19 +91,29 @@ go run ./cmd/cvent-dump TESTCODE01 TESTCODE02  # explicit codes
 ```
 
 `--dump <dir>` fetches each configured event **once** and writes a snapshot —
-`<dir>/index.json` plus one dir per event holding 12 resource files and
+`<dir>/index.json` plus one dir per event holding `event.json`, 12 resource
+files (attendees, orders, transactions, sessions, speakers, …) and
 `meta.json` — then exits (no server). It is one-shot and fatal on missing
 credentials. The server serves that dir at `/data/…`; the frontend reads it
-instead of the live API when the page URL has a `static=1` query param (a
-**Snapshot** badge appears and Re-pull / check-in are hidden). Static mode is
+instead of the live API when the page URL has a `static=1` query param or
+the host is `*.github.io` (a **Snapshot** badge appears and Re-pull /
+check-in are hidden). Static mode is
 the intended path for HTTPS-deployed or file-only setups.
+
+### Web app
+
+An event picker at the left of the top bar, then per-event tabs:
+**Overview** (a dashboard of collapsible Registrations, Pricing, Payments
+and Program sections) and **Attendees** (search, a table, and a detail
+sheet with the full record plus a check-in button that writes back to
+Cvent; hidden in static mode). The footer shows the build SHA.
 
 ### API
 
 | Route | Notes |
 |---|---|
 | `GET /api/health` | `{ok, source, build}`; always 200 |
-| `GET /api/cvent/events` | `{events, default}`: the catalog from `data/index.json` (empty if no dump) + the `--event` code |
+| `GET /api/cvent/events` | `{events, default}`: the catalog from `data/index.json` (empty if no dump) + the default code (`--event`, else `CVENT_CODE_1`) |
 | `GET /api/cvent/events/{code}` | the 12-resource bundle; 15-min server cache |
 | `GET /api/cvent/events/{code}/payments` | attendee→order→transaction join: `totals` (ordered/paid/due/refunded) + `orders` rows + `cancelled` |
 | `GET /api/cvent/events/{code}/attendees?q=&limit=&offset=` | case-insensitive search over name/email/confirmation; `limit` defaults 50, caps at 200 |
