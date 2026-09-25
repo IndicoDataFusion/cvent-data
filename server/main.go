@@ -162,7 +162,7 @@ func (s *server) serveIndex(w http.ResponseWriter) {
 		return
 	}
 	if s.assets != nil {
-		b = []byte(s.assets.rewrite(string(b)))
+		b = []byte(s.assets.rewrite("", string(b)))
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -205,6 +205,13 @@ func (s *server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	if fi, err := os.Stat(full); err == nil && !fi.IsDir() {
 		w.Header().Set("Content-Type", contentType(p))
 		w.Header().Set("Cache-Control", s.staticCacheControl(p))
+		// JS modules are served from the REWRITTEN bytes (their import
+		// specifiers point at the hashed names); the on-disk file itself
+		// still names the originals.
+		if b, ok := s.assets.servedBytes(p); ok {
+			w.Write(b)
+			return
+		}
 		http.ServeFile(w, r, full)
 		return
 	}
@@ -216,6 +223,10 @@ func (s *server) handleStatic(w http.ResponseWriter, r *http.Request) {
 			if fi, err := os.Stat(origFull); err == nil && !fi.IsDir() {
 				w.Header().Set("Content-Type", contentType(orig))
 				w.Header().Set("Cache-Control", s.staticCacheControl(p))
+				if b, ok := s.assets.servedBytes(orig); ok {
+					w.Write(b)
+					return
+				}
 				http.ServeFile(w, r, origFull)
 				return
 			}
