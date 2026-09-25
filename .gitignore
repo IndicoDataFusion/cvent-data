@@ -8,3 +8,4 @@ data/
 # build artifacts
 /cvent-data-server
 server/server
+/data-server
