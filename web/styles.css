@@ -185,32 +185,13 @@ button { font: inherit; cursor: pointer; }
   min-height: 64px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   padding: 8px 12px;
 }
-.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.brand-mark {
-  flex: 0 0 auto;
-  font-size: 1.3rem;
-  width: 40px; height: 40px;
-  display: grid; place-items: center;
-  background: var(--panel2);
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  color: var(--accent);
-}
-.brand-mark svg { width: 21px; height: 21px; display: block; }
-.app-title {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: 1.1rem;
-  font-weight: 700;
-  letter-spacing: -0.3px;
-  color: var(--text);
-  white-space: nowrap;
-}
-.topbar-actions { display: flex; align-items: center; gap: 8px; }
+/* The event selector is the first topbar item (left end); the actions stay
+   pinned right via margin-left:auto even when the selector is hidden
+   (landing page / pre-catalog). */
+.topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .topbar-btn {
   display: inline-flex;
   align-items: center;
