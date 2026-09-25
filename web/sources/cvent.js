@@ -343,15 +343,15 @@ function fmtRange(startIso, endIso) {
   if (ts === te) return fmtDate(startIso);
   const year = e.getUTCFullYear();
   if (s.getUTCFullYear() === year && s.getUTCMonth() === e.getUTCMonth()) {
-    return MONTHS[s.getUTCMonth()] + " " + s.getUTCDate() + " – " + e.getUTCDate() + ", " + year;
+    return MONTHS[s.getUTCMonth()] + " " + s.getUTCDate() + " - " + e.getUTCDate() + ", " + year;
   }
   if (s.getUTCFullYear() === year) {
     return (
       MONTHS[s.getUTCMonth()] + " " + s.getUTCDate() +
-      " – " + MONTHS[e.getUTCMonth()] + " " + e.getUTCDate() + ", " + year
+      " - " + MONTHS[e.getUTCMonth()] + " " + e.getUTCDate() + ", " + year
     );
   }
-  return fmtDate(startIso) + " – " + fmtDate(endIso);
+  return fmtDate(startIso) + " - " + fmtDate(endIso);
 }
 
 // Money: 2 decimals, thousands separators, currency code from the data
@@ -585,13 +585,13 @@ function pricingCard(bundle, currency) {
   const uniformDate = dates.length === 1 ? dates[0] : null;
   const body = data.map((d) => {
     const { t, fee, stdOk, eb, ebOk } = d;
-    const std = stdOk ? esc(money0(fee.amount)) : '<span class="muted-line">—</span>';
+    const std = stdOk ? esc(money0(fee.amount)) : '<span class="muted-line">n/a</span>';
     const ebCell = ebOk
       ? '<div class="eb-amount">' + esc(money0(eb.amount)) + "</div>" +
         (!uniformDate && eb.registerByDate
           ? '<div class="muted-line">by ' + esc(fmtDateShort(eb.registerByDate)) + "</div>"
           : "")
-      : '<span class="muted-line">—</span>';
+      : '<span class="muted-line">n/a</span>';
     return (
       "<tr>" +
       '<td data-val="' + esc(t.name || t.code || "") + '">' + esc(t.name || t.code) + "</td>" +
@@ -841,7 +841,7 @@ function eventsListHtml(entries) {
     return card(
       '<div class="empty-state">' +
       '<div class="title">No events</div>' +
-      '<div class="hint">The catalog is empty — pull an event to get started.</div>' +
+      '<div class="hint">The catalog is empty. Pull an event to get started.</div>' +
       "</div>"
     );
   }
@@ -1077,7 +1077,7 @@ function attendeeSheetHtml(a) {
     for (const r of rows) {
       inner +=
         "<dt>" + esc(r.label) + "</dt><dd>" +
-        (r.vals.length ? r.vals.map((v) => esc(v)).join(", ") : "—") + "</dd>";
+        (r.vals.length ? r.vals.map((v) => esc(v)).join(", ") : "n/a") + "</dd>";
     }
     inner += "</dl>";
   }
@@ -1149,10 +1149,10 @@ function attendeesTableHtml(st) {
       const checked = attendeeCheckedIn(a);
       return (
         '<tr data-row="' + i + '">' +
-        "<td>" + esc(attendeeName(a) || "—") + "</td>" +
-        '<td class="muted-cell">' + esc(attendeeEmail(a) || "—") + "</td>" +
-        "<td>" + esc(attendeeTicket(a) || "—") + "</td>" +
-        '<td class="mono-cell">' + esc(a.confirmationNumber || "—") + "</td>" +
+        "<td>" + esc(attendeeName(a) || "n/a") + "</td>" +
+        '<td class="muted-cell">' + esc(attendeeEmail(a) || "n/a") + "</td>" +
+        "<td>" + esc(attendeeTicket(a) || "n/a") + "</td>" +
+        '<td class="mono-cell">' + esc(a.confirmationNumber || "n/a") + "</td>" +
         "<td>" +
         (checked
           ? '<span class="badge badge-green">Checked in</span>'

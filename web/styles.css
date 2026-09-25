@@ -420,7 +420,7 @@ button { font: inherit; cursor: pointer; }
   font-weight: 600;
   line-height: 1;
   padding: 6px 10px;
-  border-radius: 999px;
+  border-radius: 7px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   white-space: nowrap;
@@ -770,7 +770,7 @@ html[data-theme="light"] .btn, html:not([data-theme="dark"]) .btn { color: #ffff
   width: 32px;
   height: 32px;
   border: 1px solid var(--line);
-  border-radius: 50%;
+  border-radius: 10px;
   background: var(--panel);
   color: var(--muted);
   flex: 0 0 auto;

@@ -255,7 +255,7 @@ function setOffline(on, msg) {
   if (!offlineBanner) return;
   offlineBanner.hidden = !on;
   if (on && msg) offlineBanner.textContent = msg;
-  else if (on) offlineBanner.textContent = "Offline — showing last fetched data";
+  else if (on) offlineBanner.textContent = "Offline. Showing last fetched data";
 }
 
 window.addEventListener("offline", () => setOffline(true));
@@ -272,7 +272,7 @@ if (typeof BroadcastChannel === "function") {
     if (e.data && e.data.type === "offline") {
       window.dispatchEvent(
         new CustomEvent("cvent-data-offline", {
-          detail: "Offline — showing last fetched data",
+          detail: "Offline. Showing last fetched data",
         })
       );
     }
