@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -25,28 +27,9 @@ func FromEnvironment() (Credentials, error) { return FromEnvironmentFrom("") }
 // FromEnvironmentFrom is FromEnvironment with the starting directory made
 // explicit ("" = os.Getwd()), so tests can point it at a temp tree.
 func FromEnvironmentFrom(start string) (Credentials, error) {
-	dir := start
-	if dir == "" {
-		var err error
-		if dir, err = os.Getwd(); err != nil {
-			return Credentials{}, fmt.Errorf("cvent env: %v", err)
-		}
-	}
-	fileVals := map[string]string{}
-	// Walk up until a .env that actually defines CVENT_CLIENT_ID.
-	for {
-		b, rerr := os.ReadFile(filepath.Join(dir, ".env"))
-		if rerr == nil {
-			fileVals = ParseDotEnv(b)
-			if _, ok := fileVals["CVENT_CLIENT_ID"]; ok {
-				break
-			}
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir { // reached filesystem root
-			break
-		}
-		dir = parent
+	fileVals, err := dotEnvFrom(start)
+	if err != nil {
+		return Credentials{}, err
 	}
 
 	cid := envOr("CVENT_CLIENT_ID", fileVals)
@@ -62,6 +45,72 @@ func FromEnvironmentFrom(start string) (Credentials, error) {
 		return Credentials{}, fmt.Errorf("cvent env: CVENT_CLIENT_SECRET is not set (set it in the environment or in a .env at the repo root)")
 	}
 	return Credentials{ClientID: cid, ClientSecret: sec, BaseURL: base}, nil
+}
+
+// dotEnvFrom walks up from start ("" = os.Getwd()) to the first .env that
+// defines CVENT_CLIENT_ID and returns its parsed values (empty when none).
+func dotEnvFrom(start string) (map[string]string, error) {
+	dir := start
+	if dir == "" {
+		var err error
+		if dir, err = os.Getwd(); err != nil {
+			return nil, fmt.Errorf("cvent env: %v", err)
+		}
+	}
+	for {
+		if b, err := os.ReadFile(filepath.Join(dir, ".env")); err == nil {
+			vals := ParseDotEnv(b)
+			if _, ok := vals["CVENT_CLIENT_ID"]; ok {
+				return vals, nil
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir { // reached filesystem root
+			return map[string]string{}, nil
+		}
+		dir = parent
+	}
+}
+
+// EventCodes returns the configured event codes: every CVENT_CODE_<n> in
+// ascending n (the real environment wins per key over the repo-root .env),
+// else a single legacy CVENT_EVENT. Empty means nothing is configured.
+func EventCodes() []string { return EventCodesFrom("") }
+
+// EventCodesFrom is EventCodes with the starting directory made explicit.
+func EventCodesFrom(start string) []string {
+	fileVals, _ := dotEnvFrom(start)
+	byIndex := map[int]string{}
+	collect := func(k, v string) {
+		n, err := strconv.Atoi(strings.TrimPrefix(k, "CVENT_CODE_"))
+		if !strings.HasPrefix(k, "CVENT_CODE_") || err != nil || v == "" {
+			return
+		}
+		byIndex[n] = v
+	}
+	for k, v := range fileVals {
+		collect(k, v)
+	}
+	for _, kv := range os.Environ() {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			collect(k, v)
+		}
+	}
+	idx := make([]int, 0, len(byIndex))
+	for n := range byIndex {
+		idx = append(idx, n)
+	}
+	sort.Ints(idx)
+	codes := make([]string, 0, len(idx))
+	for _, n := range idx {
+		codes = append(codes, byIndex[n])
+	}
+	if len(codes) == 0 {
+		if v := envOr("CVENT_EVENT", fileVals); v != "" {
+			codes = append(codes, v)
+		}
+	}
+	return codes
 }
 
 // envOr returns the real environment value when set and non-empty, else the

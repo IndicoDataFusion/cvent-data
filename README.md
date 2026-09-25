@@ -25,26 +25,32 @@ curl -s "https://api-platform.cvent.com/ea/events?limit=5" \
 
 ## Cvent Data PWA
 
-A single-event PWA built on top of the API above: a Go server (stdlib only)
-serves a vanilla-JS SPA plus a small `/api/cvent/…` surface. The app serves
-**one event, by design** — there is no event picker and no event code in the
-URLs. The event is chosen once at startup and everything else is derived from
-it.
+A PWA built on top of the API above: a Go server (stdlib only)
+serves a vanilla-JS SPA plus a small `/api/cvent/…` surface. The event
+picker lists the events in the dump catalog (`data/index.json`); the
+`--event` code, else `CVENT_CODE_1`, is the default selection.
 
 ### Run
 
 ```bash
-bash run.sh
+make serve    # build ./data-server, dump data/ if missing, serve on 127.0.0.1:8766
+make dump     # re-pull the snapshot into data/
 ```
 
-Serves the app at **http://localhost:8766** (LAN: `http://<host>:8766`).
-`run.sh` builds the binary itself if `cvent-data-server` is missing
-(`go build -ldflags "-X main.buildSHA=<short sha>"`), then execs it with
-`--web web --data data` and `--addr ${ADDR:-:8766}`.
+Serves the app at **http://localhost:8766**. `make serve` rebuilds
+`./data-server` (`-X main.buildSHA=<short sha>`) and, when
+`data/index.json` is absent, runs a one-time dump first — the event list
+(`GET /api/cvent/events`) is read from that file, so without it the UI shows
+no events. `bash run.sh` is the older LAN variant: it builds
+`cvent-data-server` if missing and listens on `${ADDR:-:8766}` (all
+interfaces), but does not dump.
 
-The served event is selected by the **`CVENT_EVENT`** env var in the
-repo-root `.env` (or the `--event` flag, which always wins). The default is
-`TESTCODE01` = CONF27. Credentials — `CVENT_CLIENT_ID` /
+Events are listed as **`CVENT_CODE_1`**, **`CVENT_CODE_2`**, … in the
+repo-root `.env` (the real environment wins per key): currently
+`TESTCODE01` = CONF27 Attendees and `TESTCODE02` = CONF27 Sponsors.
+Dumps pull all of them; the first is the default selection (the `--event`
+flag always wins). With none set, a legacy `CVENT_EVENT` is used, then the
+build default `TESTCODE01`. Credentials — `CVENT_CLIENT_ID` /
 `CVENT_CLIENT_SECRET` — live in the gitignored `.env`. `CVENT_API_BASE` is
 optional (default `https://api-platform.cvent.com/ea`; the EU base is
 `https://api-platform-eur.cvent.com/ea`).
@@ -67,10 +73,13 @@ house-style).
 ### Offline / static mode
 
 ```bash
-../cvent-data-server --event TESTCODE01 --dump data
+./data-server --dump data                        # every CVENT_CODE_<n>; or: make dump
+./data-server --event TESTCODE01 --dump data    # just one event
+go run ./cmd/cvent-dump --dir data               # standalone CLI, same layout
+go run ./cmd/cvent-dump TESTCODE01 TESTCODE02  # explicit codes
 ```
 
-`--dump <dir>` fetches the configured event **once** and writes a snapshot —
+`--dump <dir>` fetches each configured event **once** and writes a snapshot —
 `<dir>/index.json` plus one dir per event holding 12 resource files and
 `meta.json` — then exits (no server). It is one-shot and fatal on missing
 credentials. The server serves that dir at `/data/…`; the frontend reads it
@@ -83,12 +92,13 @@ the intended path for HTTPS-deployed or file-only setups.
 | Route | Notes |
 |---|---|
 | `GET /api/health` | `{ok, source, build}`; always 200 |
-| `GET /api/cvent/event` | the 12-resource bundle; 15-min server cache |
-| `GET /api/cvent/event/payments` | attendee→order→transaction join: `totals` (ordered/paid/due/refunded) + `orders` rows + `cancelled` |
-| `GET /api/cvent/event/attendees?q=&limit=&offset=` | case-insensitive search over name/email/confirmation; `limit` defaults 50, caps at 200 |
-| `POST /api/cvent/event/checkin` | body `{"attendeeIds":[…]}`; max 100; **writes to Cvent**. The app has no auth of its own — LAN trust model |
-| `POST /api/cvent/event/repull` | background re-fetch; returns immediately (non-blocking) |
-| `GET /api/cvent/event/repull-status` | `{running, pulledAt}` |
+| `GET /api/cvent/events` | `{events, default}`: the catalog from `data/index.json` (empty if no dump) + the `--event` code |
+| `GET /api/cvent/events/{code}` | the 12-resource bundle; 15-min server cache |
+| `GET /api/cvent/events/{code}/payments` | attendee→order→transaction join: `totals` (ordered/paid/due/refunded) + `orders` rows + `cancelled` |
+| `GET /api/cvent/events/{code}/attendees?q=&limit=&offset=` | case-insensitive search over name/email/confirmation; `limit` defaults 50, caps at 200 |
+| `POST /api/cvent/events/{code}/checkin` | body `{"attendeeIds":[…]}`; max 100; **writes to Cvent**. The app has no auth of its own — LAN trust model |
+| `POST /api/cvent/events/{code}/repull` | background re-fetch; returns immediately (non-blocking) |
+| `GET /api/cvent/events/{code}/repull-status` | `{running, pulledAt}` |
 
 Errors are JSON. **502** = upstream Cvent failure (event resolution or a
 resource fetch); **503** = no cvent creds (see above); **404** = unknown
@@ -100,7 +110,7 @@ source.
   API; `tests/test_server.sh` is self-contained and offline — it runs the
   real binary against a local mock upstream (no network), with its synthetic
   fixture generated by `tests/make_fixture.py`.
-- Go unit tests: `cd server && go test ./... -race`.
+- Go unit tests: `go test ./... -race` (from the repo root; `go.mod` lives there).
 
 ### Adding a data source
 

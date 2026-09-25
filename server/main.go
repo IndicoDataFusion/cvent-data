@@ -306,40 +306,6 @@ func accessLog(next http.Handler) http.Handler {
 	})
 }
 
-// loadEnv parses KEY=VALUE lines from path (e.g. .env). Lines starting with
-// '#' and blank lines are skipped; values may be double-quoted. It never
-// overrides variables already set in the environment.
-func loadEnv(path string) map[string]string {
-	out := map[string]string{}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Printf("env: %v", err)
-		}
-		return out
-	}
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		k = strings.TrimSpace(k)
-		v = strings.Trim(strings.TrimSpace(v), `"`+"'")
-		if k == "" {
-			continue
-		}
-		if _, exists := os.LookupEnv(k); exists {
-			continue // real environment wins
-		}
-		out[k] = v
-	}
-	return out
-}
-
 // buildRouter wires the HTTP mux: /api/ (source registry), /data/ (dump
 // snapshots), and the static web dir with SPA fallback. main() and the tests
 // share it.
@@ -371,24 +337,24 @@ func main() {
 	flag.StringVar(&addr, "addr", ":8766", "listen address")
 	flag.StringVar(&webDir, "web", "web", "directory containing web assets")
 	flag.StringVar(&dataDir, "data", "data", "directory for fetched data caches")
-	flag.StringVar(&eventID, "event", defaultEventID, "Cvent event ID (overridable via CVENT_EVENT in .env)")
-	flag.StringVar(&dumpDir, "dump", "", "one-shot dump mode: fetch the event bundle once, write the snapshot under <dir>/<code>/, then exit (no HTTP server)")
+	flag.StringVar(&eventID, "event", "", "Cvent event code/uuid (default: first CVENT_CODE_<n> in .env; with --dump, only this event is pulled)")
+	flag.StringVar(&dumpDir, "dump", "", "one-shot dump mode: fetch each configured event's bundle once, write the snapshots under <dir>/<code>/, then exit (no HTTP server)")
 	flag.Parse()
 
-	// If --event was left at its default, CVENT_EVENT takes over: first the
-	// real environment, then the repo-root .env (run.sh cds to the repo
-	// root before exec'ing this binary). An explicitly passed --event
-	// always wins.
-	if eventID == defaultEventID {
-		if v := os.Getenv("CVENT_EVENT"); v != "" {
-			eventID = v
-		} else if v := loadEnv(".env")["CVENT_EVENT"]; v != "" {
-			eventID = v
+	// Events come from CVENT_CODE_1, CVENT_CODE_2, … (real environment, then
+	// the repo-root .env; run.sh cds to the repo root before exec'ing this
+	// binary). The first is the default selection. An explicitly passed
+	// --event always wins.
+	codes := []string{eventID}
+	if eventID == "" {
+		if codes = cvent.EventCodes(); len(codes) == 0 {
+			codes = []string{defaultEventID}
 		}
+		eventID = codes[0]
 	}
 
-	// --dump is one-shot: fetch the configured event's bundle once, write
-	// the snapshot, and exit. Missing credentials are fatal here (no
+	// --dump is one-shot: fetch each configured event's bundle once, write
+	// the snapshots, and exit. Missing credentials are fatal here (no
 	// server-start fallback).
 	if dumpDir != "" {
 		creds, err := cvent.FromEnvironment()
@@ -396,12 +362,14 @@ func main() {
 			fmt.Fprintf(os.Stderr, "dump: %v\n", err)
 			os.Exit(1)
 		}
-		summary, err := cvent.RunDump(creds, eventID, dumpDir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dump: %v\n", err)
-			os.Exit(1)
+		for _, code := range codes {
+			summary, err := cvent.RunDump(creds, code, dumpDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "dump %s: %v\n", code, err)
+				os.Exit(1)
+			}
+			fmt.Println(summary)
 		}
-		fmt.Println(summary)
 		os.Exit(0)
 	}
 

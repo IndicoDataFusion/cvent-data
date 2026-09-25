@@ -457,3 +457,43 @@ func stringSlicesEqual(a, b []string) bool {
 	}
 	return true
 }
+
+func TestEventCodes(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "server")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Out of order, with a gap and a non-numeric suffix: sorted by index,
+	// junk ignored.
+	content := "CVENT_CLIENT_ID=x\nCVENT_CODE_10=TEN\nCVENT_CODE_2=TWO\n# comment\nCVENT_CODE_1=ONE\nCVENT_CODE_X=junk\nCVENT_EVENT=LEGACY\n"
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Pin the ambient environment (empty = unset, so the .env value wins).
+	for _, k := range []string{"CVENT_EVENT", "CVENT_CODE_1", "CVENT_CODE_2", "CVENT_CODE_3", "CVENT_CODE_10"} {
+		t.Setenv(k, "")
+	}
+
+	if got, want := strings.Join(EventCodesFrom(sub), ","), "ONE,TWO,TEN"; got != want {
+		t.Fatalf("EventCodesFrom = %s, want %s", got, want)
+	}
+
+	// The real environment wins per key and may add codes.
+	t.Setenv("CVENT_CODE_2", "ENVTWO")
+	t.Setenv("CVENT_CODE_3", "ENVTHREE")
+	if got, want := strings.Join(EventCodesFrom(sub), ","), "ONE,ENVTWO,ENVTHREE,TEN"; got != want {
+		t.Fatalf("EventCodesFrom (env override) = %s, want %s", got, want)
+	}
+
+	// No CVENT_CODE_<n> anywhere: fall back to the legacy CVENT_EVENT.
+	legacy := t.TempDir()
+	if err := os.WriteFile(filepath.Join(legacy, ".env"), []byte("CVENT_CLIENT_ID=x\nCVENT_EVENT=LEGACY\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CVENT_CODE_2", "")
+	t.Setenv("CVENT_CODE_3", "")
+	if got, want := strings.Join(EventCodesFrom(legacy), ","), "LEGACY"; got != want {
+		t.Fatalf("EventCodesFrom (legacy) = %s, want %s", got, want)
+	}
+}

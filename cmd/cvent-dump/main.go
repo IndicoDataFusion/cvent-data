@@ -1,14 +1,15 @@
-// Command cvent-dump fetches one Cvent event's full data bundle and writes it
-// as a snapshot. It is a thin, dependency-free CLI over the cvent package:
+// Command cvent-dump fetches Cvent events' full data bundles and writes them
+// as snapshots. It is a thin, dependency-free CLI over the cvent package:
 // credentials come from the environment or a .env file (see the package
 // docs), and the same dump layout the PWA server's --dump mode produces.
 //
 // Usage:
 //
-//	cvent-dump [event-code-or-uuid] [flags]
+//	cvent-dump [flags] [event-code-or-uuid ...]
 //
-// The event code/uuid may be given as the first positional argument or via
-// CVENT_EVENT. If neither is set, the build default is used.
+// Event codes/uuids may be given as positional arguments; otherwise every
+// CVENT_CODE_<n> from the environment / .env is dumped. If none is set, the
+// build default is used.
 package main
 
 import (
@@ -29,11 +30,23 @@ func main() {
 		apiBase = flag.String("api-base", "", "Cvent API base URL (overrides CVENT_API_BASE)")
 	)
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "usage: %s [event-code-or-uuid] [flags]\n\n", os.Args[0])
+		fmt.Fprintf(flag.CommandLine.Output(), "usage: %s [flags] [event-code-or-uuid ...]\n\n", os.Args[0])
 		fmt.Fprintln(flag.CommandLine.Output(), "Flags:")
 		flag.PrintDefaults()
 	}
-	flag.Parse()
+	// Codes and flags may interleave (`cvent-dump CODE --dir data`): the flag
+	// package stops at the first positional, so resume parsing after each one.
+	var events []string
+	for args := os.Args[1:]; ; {
+		if err := flag.CommandLine.Parse(args); err != nil {
+			os.Exit(2)
+		}
+		if flag.NArg() == 0 {
+			break
+		}
+		events = append(events, flag.Arg(0))
+		args = flag.Args()[1:]
+	}
 
 	// Credential source, in precedence order:
 	//  1. the real environment (CVENT_CLIENT_ID / CVENT_CLIENT_SECRET /
@@ -65,22 +78,20 @@ func main() {
 		creds.BaseURL = *apiBase
 	}
 
-	event := ""
-	if flag.NArg() >= 1 {
-		event = flag.Arg(0)
+	if len(events) == 0 {
+		events = cvent.EventCodes()
 	}
-	if event == "" {
-		event = os.Getenv("CVENT_EVENT")
-	}
-	if event == "" {
-		event = defaultEventID
+	if len(events) == 0 {
+		events = []string{defaultEventID}
 	}
 
-	summary, err := cvent.RunDump(creds, event, *dir)
-	if err != nil {
-		fail("dump: " + err.Error())
+	for _, event := range events {
+		summary, err := cvent.RunDump(creds, event, *dir)
+		if err != nil {
+			fail("dump " + event + ": " + err.Error())
+		}
+		fmt.Println(summary)
 	}
-	fmt.Println(summary)
 }
 
 func fail(msg string) {
