@@ -50,6 +50,10 @@
   Offline — showing last fetched data
 </div>
 
+<!-- View tab bar, populated by app.js from the active source's view keys
+     (registry-driven, source-agnostic). Hidden on the events landing. -->
+<nav id="view-tabs" class="view-tabs" role="tablist" aria-label="Event views" hidden></nav>
+
 <main id="app-view" class="app-view"></main>
 
 <!-- Task 9 creates app.js (hash router + views). Referenced now as a deferred

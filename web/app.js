@@ -44,6 +44,7 @@ const mount = document.getElementById("app-view");
 const refreshBtn = document.getElementById("refresh-btn");
 const offlineBanner = document.getElementById("offline-banner");
 const eventSelect = document.getElementById("event-select");
+const viewTabs = document.getElementById("view-tabs");
 
 /* ---------- hash router ----------
    Routes are derived from the source's view keys (registry-driven):
@@ -87,9 +88,55 @@ function route() {
   if (r.view === "events") views.events(mount);
   else views[r.view](mount, r.code);
   syncEventSelect(r.code);
+  syncViewTabs(r);
 }
 
 window.addEventListener("hashchange", route);
+
+/* ---------- view tab bar ----------
+   Built once from the active source's `tabs` (registry-driven, source-
+   agnostic). Shown on every per-event route (home + named views), hidden
+   on the events landing. The active tab mirrors the current route; a tap
+   navigates to #/<code>/<key> (home → #/<code>). */
+
+function buildViewTabs() {
+  if (!viewTabs || !Array.isArray(source.tabs) || !source.tabs.length) return;
+  viewTabs.innerHTML = "";
+  for (const t of source.tabs) {
+    const a = document.createElement("a");
+    a.className = "view-tab";
+    a.setAttribute("role", "tab");
+    a.dataset.tab = t.key;
+    a.textContent = t.label;
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      const r = currentView();
+      if (!r || !r.code) return;
+      const hash = t.key === "home" ? "#/" + encodeURIComponent(r.code)
+        : "#/" + encodeURIComponent(r.code) + "/" + t.key;
+      if (location.hash === hash) return;
+      location.hash = hash;
+    });
+    viewTabs.appendChild(a);
+  }
+}
+
+function syncViewTabs(r) {
+  if (!viewTabs) return;
+  // Hidden on the events landing (no event code → no per-event views).
+  viewTabs.hidden = !r || !r.code;
+  if (viewTabs.hidden) return;
+  viewTabs.querySelectorAll(".view-tab").forEach((a) => {
+    const on = a.dataset.tab === r.view;
+    a.classList.toggle("active", on);
+    a.setAttribute("aria-selected", String(on));
+    if (r.code) {
+      a.href = a.dataset.tab === "home"
+        ? "#/" + encodeURIComponent(r.code)
+        : "#/" + encodeURIComponent(r.code) + "/" + a.dataset.tab;
+    }
+  });
+}
 
 /* ---------- topbar event selector ----------
    Populated once from the source's catalog. Reflects the current route's
@@ -237,6 +284,8 @@ if (typeof BroadcastChannel === "function") {
 // Initial render: the active view for the current hash (or the events
 // landing when the hash is empty). This also clears theme.js's "Loading…"
 // fallback, which only appears in the child-less window before first paint
-// of the app. The catalog loads in parallel to populate the selector.
+// of the app. The catalog loads in parallel to populate the selector. The
+// tab bar is built before the first route so syncViewTabs has tabs to mark.
+buildViewTabs();
 route();
 loadCatalog();

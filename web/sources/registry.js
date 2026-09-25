@@ -25,9 +25,18 @@
 
 import * as cvent from "./cvent.js";
 
+// tabs: the views shown in the per-event tab bar, in display order, with
+// their labels. "events" (the landing) and "home" (the dashboard, shown as
+// the first tab) are reserved view keys the shell understands.
+const TABS = [
+  { key: "home", label: "Overview" },
+  { key: "attendees", label: "Attendees" },
+];
+
 export const SOURCES = {
   cvent: {
     label: "Cvent",
+    tabs: TABS,
     views: {
       events: cvent.events,
       home: cvent.home,

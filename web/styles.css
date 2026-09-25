@@ -282,6 +282,50 @@ button { font: inherit; cursor: pointer; }
   .event-select { max-width: 116px; }
 }
 
+/* ================= view tab bar =================
+   A slim, sticky bar under the topbar that switches the per-event views
+   (Overview / Attendees). Sticky just below the 64px topbar (plus the
+   safe-area inset) so it stays reachable while scrolling long views. */
+.view-tabs {
+  position: sticky;
+  top: calc(var(--safe-top) + 64px);
+  z-index: 30;
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  gap: 4px;
+  padding: 6px 12px 0;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.view-tab {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.view-tab:active { transform: translateY(1px); }
+.view-tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+.view-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 /* ================= main content ================= */
 .app-view {
   position: relative;
@@ -692,7 +736,7 @@ html[data-theme="light"] .btn, html:not([data-theme="dark"]) .btn { color: #ffff
 
 /* ================= touch targets (coarse pointers) ================= */
 @media (pointer: coarse) {
-  .chip, .topbar-btn, .btn, .expander, .tbl tbody tr, .tbl th[data-sort], .sec-toggle { position: relative; }
+  .chip, .topbar-btn, .btn, .expander, .tbl tbody tr, .tbl th[data-sort], .sec-toggle, .view-tab { position: relative; }
   .chip::after { content: ""; position: absolute; inset: -6px; }
   .topbar-btn::after { content: ""; position: absolute; inset: -4px; }
   .btn::after { content: ""; position: absolute; inset: -4px; }
