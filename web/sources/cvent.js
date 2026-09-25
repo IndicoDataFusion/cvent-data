@@ -986,30 +986,57 @@ function attendeeTicket(a) {
   return rt.name || rt.code || "";
 }
 
-// answers: [{ question: {id}, value: [string, ...] }]. The question object
-// carries no text (only an id), so the row label is the raw question id.
-function attendeeAnswers(a) {
-  const list = Array.isArray(a && a.answers) ? a.answers : [];
-  return list.map((ans) => {
-    const q = (ans && ans.question) || {};
-    const label = q.id || "question";
-    const vals = Array.isArray(ans.value)
-      ? ans.value
-      : ans.value != null && ans.value !== ""
-        ? [ans.value]
-        : [];
-    return { label, vals };
-  });
+// Question rows for the detail sheet, best-effort across payload shapes:
+// the live Cvent API returns `questions: [{ name, type, value: [...] }]`
+// (label = the question text); the openapi schema's minimal form is
+// `answers: [{ question: {id}, value: [...] }]` (label = the id); and some
+// payloads only carry `contact.customFields`. First non-empty source wins.
+function attendeeQuestionRows(a) {
+  const c = (a && a.contact) || {};
+  const norm = (v) =>
+    Array.isArray(v) ? v : v != null && v !== "" ? [v] : [];
+  const fromQ = (list) =>
+    list
+      .map((q) => ({
+        label: (q && (q.name || (q.question && q.question.id))) || "question",
+        vals: norm(q && (q.value != null ? q.value : q.val)),
+      }))
+      .filter((r) => r.label && r.label !== "question" || r.vals.length);
+  const fromCustom = (list) =>
+    (Array.isArray(list) ? list : [])
+      .map((f) => ({ label: f && f.name || "field", vals: norm(f && f.value) }))
+      .filter((r) => r.label && r.label !== "field" || r.vals.length);
+
+  let rows = [];
+  if (Array.isArray(a && a.questions) && a.questions.length) rows = fromQ(a.questions);
+  else if (Array.isArray(a && a.answers) && a.answers.length) rows = fromQ(a.answers);
+  else rows = fromCustom(c.customFields);
+  return rows;
+}
+
+// Work (or home) address flattened to a single line.
+function attendeeAddress(a) {
+  const c = (a && a.contact) || {};
+  const ad = c.workAddress || c.homeAddress || {};
+  const city = [ad.city, [ad.regionCode, ad.postalCode].filter(Boolean).join(" ")]
+    .filter(Boolean)
+    .join(", ");
+  return [ad.address1, city, ad.country || ad.countryCode].filter(Boolean).join(", ");
 }
 
 function attendeeSheetHtml(a) {
   const name = attendeeName(a);
+  const c = (a && a.contact) || {};
   const conf = a.confirmationNumber || "";
   const ticket = attendeeTicket(a);
   const checked = attendeeCheckedIn(a);
+  const company = c.company || "";
+  const title = c.title || "";
+  const status = a.status || "";
   const headBadges =
     (STATIC ? '<span class="badge badge-slate">Snapshot</span>' : "") +
     (ticket ? '<span class="badge badge-slate">' + esc(ticket) + "</span>" : "") +
+    (status ? '<span class="badge badge-slate">' + esc(status) + "</span>" : "") +
     (checked
       ? '<span class="badge badge-green">Checked in</span>'
       : '<span class="badge badge-amber">Not checked in</span>');
@@ -1025,14 +1052,32 @@ function attendeeSheetHtml(a) {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
     'stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>' +
     "</button></div>" +
+    (company || title
+      ? '<div class="sheet-affiliation">' +
+        esc([company, title].filter(Boolean).join(" · ")) +
+        "</div>"
+      : "") +
     '<div class="badge-row">' + headBadges + "</div>";
-  const answers = attendeeAnswers(a);
-  if (answers.length) {
-    inner += '<div class="sheet-sec">Answers</div><dl class="kv-list">';
-    for (const ans of answers) {
+  // Contact block: only fields that are actually present in the payload.
+  const contactRows = [
+    ["Email", attendeeEmail(a)],
+    ["Phone", c.mobilePhone || ""],
+    ["Address", attendeeAddress(a)],
+  ].filter(([, v]) => v);
+  if (contactRows.length) {
+    inner += '<div class="sheet-sec">Contact</div><dl class="kv-list">';
+    for (const [k, v] of contactRows) {
+      inner += "<dt>" + esc(k) + "</dt><dd>" + esc(v) + "</dd>";
+    }
+    inner += "</dl>";
+  }
+  const rows = attendeeQuestionRows(a);
+  if (rows.length) {
+    inner += '<div class="sheet-sec">Registration details</div><dl class="kv-list">';
+    for (const r of rows) {
       inner +=
-        "<dt>" + esc(ans.label) + "</dt><dd>" +
-        (ans.vals.length ? ans.vals.map((v) => esc(v)).join(", ") : "—") + "</dd>";
+        "<dt>" + esc(r.label) + "</dt><dd>" +
+        (r.vals.length ? r.vals.map((v) => esc(v)).join(", ") : "—") + "</dd>";
     }
     inner += "</dl>";
   }

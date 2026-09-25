@@ -669,6 +669,7 @@ html[data-theme="light"] .btn, html:not([data-theme="dark"]) .btn { color: #ffff
 }
 .sheet-panel h2 { margin: 0 0 4px; font-family: var(--font-display); font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
 .sheet-meta { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+.sheet-affiliation { color: var(--text-2, var(--muted)); font-size: 14px; margin: -6px 0 12px; }
 @keyframes slideup {
   from { transform: translateY(28px); opacity: .4; }
   to { transform: none; opacity: 1; }
