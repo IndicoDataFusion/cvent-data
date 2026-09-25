@@ -58,6 +58,9 @@
   --skeleton: var(--line);
   --skeleton-hi: var(--panel2);
 
+  /* button text on the accent fill (light: white on #0e7252 is 5.9:1) */
+  --on-accent: #ffffff;
+
   /* offline banner (amber-tinted) */
   --offline-bg: #f6e7bd;
   --offline-text: #6b4e0a;
@@ -93,6 +96,10 @@ html[data-theme="dark"] {
   --offline-text: #ffd166;
   --offline-border: #514014;
 
+  /* button text on the accent fill (dark mode: white on #35c28f is 2.27:1,
+     below WCAG AA; dark forest on the same green is ~7.3:1) */
+  --on-accent: #04231a;
+
   --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 1px 3px rgba(0, 0, 0, .4);
 }
 
@@ -118,6 +125,8 @@ html[data-theme="dark"] {
     --offline-bg: #3a2f14;
     --offline-text: #ffd166;
     --offline-border: #514014;
+
+    --on-accent: #04231a;
 
     --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 1px 3px rgba(0, 0, 0, .4);
   }
@@ -322,7 +331,7 @@ button { font: inherit; cursor: pointer; }
 .view-tab.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #ffffff;
+  color: var(--on-accent);
 }
 .view-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -451,7 +460,7 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
 .chip.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #ffffff;
+  color: var(--on-accent);
   font-weight: 600;
 }
 
@@ -495,6 +504,10 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
 .tbl .badge { padding: 4px 8px; }
 .tbl tbody tr:last-child td { border-bottom: none; }
 .tbl tbody tr[data-row] { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.tbl tbody tr[data-row]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .tbl tbody tr:active { background: color-mix(in srgb, var(--text) 5%, transparent); }
 /* numeric columns align right (tabular). */
 .tbl .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -625,12 +638,11 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
   border: none;
   border-radius: 10px;
   background: var(--accent);
-  color: #ffffff;
+  color: var(--on-accent);
   font-size: 14px;
   font-weight: 600;
   transition: filter .15s ease, transform .05s ease, opacity .15s ease;
 }
-html[data-theme="light"] .btn, html:not([data-theme="dark"]) .btn { color: #ffffff; }
 .btn:active { transform: translateY(1px); }
 .btn:hover { filter: brightness(1.06); }
 .btn[disabled], .btn.disabled {

@@ -1231,6 +1231,16 @@ export function attendees(mount, code) {
       const a = state.items[i];
       if (!a) return;
       tr.addEventListener("click", () => openSheet(a));
+      // keyboard access: rows open the sheet on Enter/Space
+      tr.setAttribute("tabindex", "0");
+      tr.setAttribute("role", "button");
+      tr.setAttribute("aria-label", "Open details for " + (attendeeName(a) || "attendee"));
+      tr.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openSheet(a);
+        }
+      });
     });
     const lm = mnt.querySelector("[data-loadmore]");
     if (lm) {
