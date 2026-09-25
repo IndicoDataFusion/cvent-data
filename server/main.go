@@ -164,6 +164,13 @@ func (s *server) serveIndex(w http.ResponseWriter) {
 	if s.assets != nil {
 		b = []byte(s.assets.rewrite("", string(b)))
 	}
+	// Footer build stamp (house-style style): the ldflags-injected git SHA,
+	// or "local" for ad-hoc builds without -ldflags.
+	sha := buildSHA
+	if sha == "" {
+		sha = "local"
+	}
+	b = []byte(strings.ReplaceAll(string(b), "__BUILD_SHA__", sha))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Write(b)

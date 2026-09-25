@@ -32,6 +32,10 @@ port_free() {
 python3 - "$1" <<'PY'
 import socket, sys
 s = socket.socket()
+# SO_REUSEADDR: a bare bind fails on TIME_WAIT leftovers, but the Go server
+# (net.Listen sets SO_REUSEADDR on Linux) starts fine over them — mirror the
+# server's real behavior instead of false-failing after a recent restart.
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 try:
     s.bind(("127.0.0.1", int(sys.argv[1])))
 except OSError:
