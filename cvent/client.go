@@ -1,4 +1,12 @@
-package main
+// Package cvent is a small, dependency-free Go client for the Cvent
+// Events API: OAuth2 client_credentials auth with a cached token, cursor
+// pagination for the list/filter endpoints, and the per-event "bundle"
+// fetch + cache the PWA server and the cvent-dump CLI are built on.
+//
+// Credentials are resolved from the environment or a .env file (see
+// FromEnvironment) and are never written into errors or logs: errors name
+// the variable, not its value.
+package cvent
 
 import (
 	"bytes"
@@ -9,22 +17,29 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 )
 
-const defaultCventBase = "https://api-platform.cvent.com/ea"
+// DefaultBaseURL is the Cvent Events API base when CVENT_API_BASE is unset.
+const DefaultBaseURL = "https://api-platform.cvent.com/ea"
 
-// tokenTTL is the effective life of a cached Cvent token. Tokens are 60-min
-// JWTs; we expire ours at 55 min so a token is never presented at the very
-// edge of its lifetime.
+// tokenTTL is the effective life of a cached token. Tokens are 60-min JWTs;
+// we expire ours at 55 min so a token is never presented at the very edge of
+// its lifetime.
 const tokenTTL = 55 * time.Minute
 
-type cventClient struct {
-	base string   // default https://api-platform.cvent.com/ea, overridable via CVENT_API_BASE env
+// pageSize is the maximum page size in the Cvent OpenAPI spec. The /events
+// Active list fits in one request; bigger resources page through.
+const pageSize = 200
+
+// Client is a Cvent API client. It owns the OAuth token cache (mutex-
+// guarded, single-flight on a cold cache) and the HTTP client used for all
+// data requests. Construct with New / NewWithCredentials (or FromEnvironment
+// via the server / CLI).
+type Client struct {
+	base string // API base (see DefaultBaseURL)
 	cid  string
 	sec  string
 	ttl  time.Duration // effective token lifetime (tests may shrink it)
@@ -35,8 +50,10 @@ type cventClient struct {
 	http *http.Client // Timeout 20s
 }
 
-func newCventClient(base, cid, sec string) *cventClient {
-	return &cventClient{
+// newCventClient is the internal constructor: it takes the base URL as-is
+// (no defaulting) so tests can point it at an httptest upstream.
+func newCventClient(base, cid, sec string) *Client {
+	return &Client{
 		base: base,
 		cid:  cid,
 		sec:  sec,
@@ -46,11 +63,44 @@ func newCventClient(base, cid, sec string) *cventClient {
 	}
 }
 
+// Option customizes a Client.
+type Option func(*Client)
+
+// WithHTTPClient replaces the client's HTTP client (timeout, transport,
+// proxies).
+func WithHTTPClient(c *http.Client) Option {
+	return func(cl *Client) { cl.http = c }
+}
+
+// WithTokenTTL overrides the effective token lifetime (tests shrink it).
+func WithTokenTTL(d time.Duration) Option {
+	return func(cl *Client) { cl.ttl = d }
+}
+
+// New builds a Client for the given API base and client credentials. An
+// empty base falls back to DefaultBaseURL.
+func New(base, clientID, clientSecret string, opts ...Option) *Client {
+	cl := newCventClient(base, clientID, clientSecret)
+	if cl.base == "" {
+		cl.base = DefaultBaseURL
+	}
+	for _, o := range opts {
+		o(cl)
+	}
+	return cl
+}
+
+// NewWithCredentials builds a Client from resolved Credentials.
+func NewWithCredentials(c Credentials, opts ...Option) *Client {
+	return New(c.BaseURL, c.ClientID, c.ClientSecret, opts...)
+}
+
 // token returns a valid Cvent access token, fetching one from the OAuth2
 // endpoint if the cached token is missing or past its TTL. The mutex is held
 // across the fetch so concurrent callers on a cold cache produce exactly one
-// upstream request.
-func (c *cventClient) token(ctx context.Context) (string, error) {
+// upstream request. The token is held in memory only: it is never persisted
+// or logged.
+func (c *Client) token(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
@@ -81,6 +131,7 @@ func (c *cventClient) token(ctx context.Context) (string, error) {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	switch resp.StatusCode {
 	case http.StatusUnauthorized:
+		// Names the variables, never the values.
 		return "", fmt.Errorf("cvent oauth: 401 — invalid client credentials (check CVENT_CLIENT_ID / CVENT_CLIENT_SECRET)")
 	case http.StatusForbidden:
 		return "", fmt.Errorf("cvent oauth: 403 — client lacks the required scope")
@@ -104,90 +155,37 @@ func (c *cventClient) token(ctx context.Context) (string, error) {
 	return c.tok, nil
 }
 
-// loadCventEnv resolves the Cvent credentials: real environment variables
-// win, then the .env at the repo root (walked up from the working directory).
-// base defaults to defaultCventBase when unset. Errors never contain secret
-// values.
-func loadCventEnv() (cid, sec, base string, err error) {
-	return loadCventEnvFrom("")
+// Checkin POSTs the spec's bulk-checkin array to /events/{uuid}/check-in and
+// returns the upstream status code and raw body. The caller interprets the
+// status (the spec answers 207 on success).
+func (c *Client) Checkin(ctx context.Context, uuid string, payload []map[string]string) (int, []byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, nil, fmt.Errorf("cvent check-in: %v", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		strings.TrimRight(c.base, "/")+"/events/"+uuid+"/check-in", strings.NewReader(string(body)))
+	if err != nil {
+		return 0, nil, fmt.Errorf("cvent check-in: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	tok, err := c.token(ctx)
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return 0, nil, fmt.Errorf("cvent check-in: %v", err)
+	}
+	raw, rerr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	resp.Body.Close()
+	if rerr != nil {
+		return 0, nil, fmt.Errorf("cvent check-in: reading body: %v", rerr)
+	}
+	return resp.StatusCode, raw, nil
 }
-
-// loadCventEnvFrom is loadCventEnv with the starting directory made explicit
-// ("" = os.Getwd()), so tests can point it at a temp tree.
-func loadCventEnvFrom(start string) (cid, sec, base string, err error) {
-	dir := start
-	if dir == "" {
-		if dir, err = os.Getwd(); err != nil {
-			return "", "", "", fmt.Errorf("cvent env: %v", err)
-		}
-	}
-	fileVals := map[string]string{}
-	// Walk up until a .env that actually defines CVENT_CLIENT_ID.
-	for {
-		b, rerr := os.ReadFile(filepath.Join(dir, ".env"))
-		if rerr == nil {
-			fileVals = parseDotEnv(b)
-			if _, ok := fileVals["CVENT_CLIENT_ID"]; ok {
-				break
-			}
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir { // reached filesystem root
-			break
-		}
-		dir = parent
-	}
-
-	cid = envOr("CVENT_CLIENT_ID", fileVals)
-	sec = envOr("CVENT_CLIENT_SECRET", fileVals)
-	base = envOr("CVENT_API_BASE", fileVals)
-	if base == "" {
-		base = defaultCventBase
-	}
-	if cid == "" {
-		return "", "", "", fmt.Errorf("cvent env: CVENT_CLIENT_ID is not set (set it in the environment or in a .env at the repo root)")
-	}
-	if sec == "" {
-		return "", "", "", fmt.Errorf("cvent env: CVENT_CLIENT_SECRET is not set (set it in the environment or in a .env at the repo root)")
-	}
-	return cid, sec, base, nil
-}
-
-// envOr returns the real environment value when set and non-empty, else the
-// .env-file value.
-func envOr(key string, file map[string]string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return file[key]
-}
-
-// parseDotEnv parses KEY=VALUE lines: blank lines and # comments are skipped,
-// surrounding single/double quotes are stripped from values.
-func parseDotEnv(b []byte) map[string]string {
-	out := map[string]string{}
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		k = strings.TrimSpace(k)
-		v = strings.Trim(strings.TrimSpace(v), `"'`)
-		if k == "" {
-			continue
-		}
-		out[k] = v
-	}
-	return out
-}
-
-// pageSize is the maximum page size in the Cvent OpenAPI spec. The /events
-// Active list (113) fits in one request; bigger resources page through.
-const pageSize = 200
 
 // cventPage is one decoded page of a Cvent list/filter response. Cvent
 // returns the items under "items" (most endpoints) or "data" (some); paging
@@ -254,7 +252,7 @@ func firstItemKey(items []json.RawMessage) (string, bool) {
 // endpoint-specific query params (e.g. the filter for /attendees/activities).
 // Stops when collected >= paging.totalCount, on an empty page, or on a
 // missing token. Page size is the spec maximum (200).
-func (c *cventClient) listAll(ctx context.Context, path string, extra url.Values) ([]json.RawMessage, error) {
+func (c *Client) listAll(ctx context.Context, path string, extra url.Values) ([]json.RawMessage, error) {
 	q := url.Values{}
 	for k, vs := range extra {
 		for _, v := range vs {
@@ -266,7 +264,7 @@ func (c *cventClient) listAll(ctx context.Context, path string, extra url.Values
 
 // filterAll walks a POST …/filter endpoint (JSON body {"filter": expr},
 // limit/token as query params): attendees, admission-items, sessions, speakers.
-func (c *cventClient) filterAll(ctx context.Context, path, expr string) ([]json.RawMessage, error) {
+func (c *Client) filterAll(ctx context.Context, path, expr string) ([]json.RawMessage, error) {
 	body, err := json.Marshal(map[string]string{"filter": expr})
 	if err != nil {
 		return nil, fmt.Errorf("cvent %s: encoding filter body: %v", path, err)
@@ -277,7 +275,7 @@ func (c *cventClient) filterAll(ctx context.Context, path, expr string) ([]json.
 // walkPages drives the shared cursor-pagination loop for both GET list and
 // POST filter endpoints. body (non-nil) is the POST body, identical on every
 // page. limit is always sent; token is sent from page 2 on.
-func (c *cventClient) walkPages(ctx context.Context, method, path string, extra url.Values, body []byte) ([]json.RawMessage, error) {
+func (c *Client) walkPages(ctx context.Context, method, path string, extra url.Values, body []byte) ([]json.RawMessage, error) {
 	var all []json.RawMessage
 	var prevFirst string // first item id of the previous page
 	havePrev := false
@@ -363,4 +361,73 @@ func (c *cventClient) walkPages(ctx context.Context, method, path string, extra 
 		token = page.Token
 	}
 	return all, nil
+}
+
+// getOnePage fetches a single page (no pagination walk) and returns the event
+// it contains: a list page ({"items":[...]} or {"data":[...]}) yields the
+// first item; a single object with an "id" field (GET /events/{uuid}) is
+// returned as is. Zero matching items → "event not found". Used for
+// code→uuid resolution, where a walk is unsafe (the /events token quirk
+// silently ignores the token param and repeats the page).
+func (c *Client) getOnePage(ctx context.Context, path string, extra url.Values) (json.RawMessage, error) {
+	q := url.Values{}
+	q.Set("limit", fmt.Sprint(pageSize))
+	for k, vs := range extra {
+		for _, v := range vs {
+			q.Add(k, v)
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		strings.TrimRight(c.base, "/")+path+"?"+q.Encode(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("cvent %s: %v", path, err)
+	}
+	tok, err := c.token(ctx)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("cvent %s: %v", path, err)
+	}
+	raw, rerr := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	resp.Body.Close()
+	if rerr != nil {
+		return nil, fmt.Errorf("cvent %s: reading body: %v", path, rerr)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("cvent %s: HTTP %d", path, resp.StatusCode)
+	}
+
+	var probe struct {
+		Items *json.RawMessage `json:"items"`
+		Data  *json.RawMessage `json:"data"`
+		ID    *string          `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return nil, fmt.Errorf("cvent %s: decoding response: %v", path, err)
+	}
+	var list *json.RawMessage
+	switch {
+	case probe.Items != nil:
+		list = probe.Items
+	case probe.Data != nil:
+		list = probe.Data
+	}
+	if list != nil {
+		var items []json.RawMessage
+		if err := json.Unmarshal(*list, &items); err != nil {
+			return nil, fmt.Errorf("cvent %s: decoding items: %v", path, err)
+		}
+		if len(items) == 0 {
+			return nil, fmt.Errorf("cvent %s: event not found", path)
+		}
+		return items[0], nil
+	}
+	if probe.ID != nil {
+		return raw, nil // single-object shape (GET /events/{uuid})
+	}
+	return nil, fmt.Errorf("cvent %s: unrecognized response shape (no items, no id)", path)
 }

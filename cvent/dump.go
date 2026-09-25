@@ -1,4 +1,4 @@
-package main
+package cvent
 
 import (
 	"context"
@@ -11,8 +11,8 @@ import (
 )
 
 // dumpResources is the exact set of per-resource files a dump writes, in
-// layout order. name is the bundle key (and the Errors-map key); file is
-// the on-disk name under <dir>/<code>/ — the same names tests/pull_event.sh
+// layout order. name is the bundle key (and the Errors-map key); file is the
+// on-disk name under <dir>/<code>/ — the same names tests/make_fixture.py
 // produces, so bash and Go dumps stay interchangeable.
 var dumpResources = []struct {
 	name string
@@ -30,6 +30,19 @@ var dumpResources = []struct {
 	{"discounts", "discounts.json"},
 	{"sessions", "sessions.json"},
 	{"speakers", "speakers.json"},
+}
+
+// ResourceFiles returns the dump layout: the bundle-key → on-disk filename
+// pairs, in write order. Exposed so tooling can reproduce the layout.
+func ResourceFiles() []struct {
+	Name string
+	File string
+} {
+	out := make([]struct{ Name, File string }, len(dumpResources))
+	for i, r := range dumpResources {
+		out[i] = struct{ Name, File string }{r.name, r.file}
+	}
+	return out
 }
 
 // resourceField returns the bundle's raw JSON array for key.
@@ -63,23 +76,23 @@ func resourceField(b *EventBundle, key string) json.RawMessage {
 	return nil
 }
 
-// dumpMeta is <dir>/<code>/meta.json. Errors is omitted when the bundle
-// had no per-resource failures.
-type dumpMeta struct {
-	Code     string         `json:"code"`
-	PulledAt string         `json:"pulledAt"`
-	Counts   map[string]int `json:"counts"`
+// DumpMeta is <dir>/<code>/meta.json. Errors is omitted when the bundle had
+// no per-resource failures.
+type DumpMeta struct {
+	Code     string            `json:"code"`
+	PulledAt string            `json:"pulledAt"`
+	Counts   map[string]int    `json:"counts"`
 	Errors   map[string]string `json:"errors,omitempty"`
 }
 
-// dumpIndexEntry is one element of <dir>/index.json — the static-mode
+// DumpIndexEntry is one element of <dir>/index.json — the static-mode
 // discovery file (?static=1): the SPA reads it to find the events without a
-// live API. One entry per dumped event; writeDump upserts by code.
-// ShortName is an optional compact label for the topbar event selector
-// (e.g. "CONF27"); the frontend falls back to Title when absent. A re-dump
-// preserves a previously stored ShortName (it is not derivable from the
-// Cvent event object).
-type dumpIndexEntry struct {
+// live API. One entry per dumped event; WriteDump upserts by code. ShortName
+// is an optional compact label for the topbar event selector (e.g. "CONF27");
+// the frontend falls back to Title when absent. A re-dump preserves a
+// previously stored ShortName (it is not derivable from the Cvent event
+// object).
+type DumpIndexEntry struct {
 	Code      string `json:"code"`
 	Title     string `json:"title"`
 	ShortName string `json:"shortName,omitempty"`
@@ -88,31 +101,22 @@ type dumpIndexEntry struct {
 	PulledAt  string `json:"pulledAt"`
 }
 
-// runDump is the one-shot --dump mode: fetch the configured event's bundle
-// ONCE and write the snapshot to dir. It never discovers or fans out
-// across multiple events, and it exits (the caller os.Exits with the
-// returned code). Returns 0 on success, 1 on any failure — including
-// missing credentials, for which there is no server-start fallback.
-func runDump(eventID, dir string) int {
-	cid, sec, base, err := loadCventEnv()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "dump: %v\n", err)
-		return 1
-	}
-	client := newCventClient(base, cid, sec)
-	cache := newEventCache(client)
+// RunDump fetches the event's bundle once and writes the snapshot to dir. It
+// never discovers or fans out across multiple events. It returns a short
+// human summary line (for a CLI) and an error on any failure — including
+// missing credentials.
+func RunDump(creds Credentials, eventID, dir string) (string, error) {
+	client := NewWithCredentials(creds)
+	cache := NewEventCache(client)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	b, err := cache.bundle(ctx, eventID)
+	b, err := cache.Bundle(ctx, eventID)
 	if err != nil {
-		// Resolution failed: nothing is written.
-		fmt.Fprintf(os.Stderr, "dump: %v\n", err)
-		return 1
+		return "", err // Resolution failed: nothing is written.
 	}
-	if err := writeDump(dir, b); err != nil {
-		fmt.Fprintf(os.Stderr, "dump: %v\n", err)
-		return 1
+	if err := WriteDump(dir, b); err != nil {
+		return "", err
 	}
 
 	var title string
@@ -132,14 +136,13 @@ func runDump(eventID, dir string) int {
 	if len(counts) == 0 {
 		counts = []string{"all zero"}
 	}
-	fmt.Printf("dump: %s %q — %s → %s\n", b.Code, title, joinCountSummary(counts), filepath.Join(dir, b.Code))
-	return 0
+	return fmt.Sprintf("dump: %s %q — %s → %s", b.Code, title, joinCountSummary(counts), filepath.Join(dir, b.Code)), nil
 }
 
-// writeDump writes the snapshot: <dir>/<code>/{event,meta}.json plus one
-// file per resource, and <dir>/index.json. Parent dirs are created and
-// existing files are overwritten, so a re-dump is a plain replacement.
-func writeDump(dir string, b *EventBundle) error {
+// WriteDump writes the snapshot: <dir>/<code>/{event,meta}.json plus one file
+// per resource, and <dir>/index.json. Parent dirs are created and existing
+// files are overwritten, so a re-dump is a plain replacement.
+func WriteDump(dir string, b *EventBundle) error {
 	codeDir := filepath.Join(dir, b.Code)
 	if err := os.MkdirAll(codeDir, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %v", codeDir, err)
@@ -147,7 +150,7 @@ func writeDump(dir string, b *EventBundle) error {
 	write := func(name string, data []byte) error {
 		p := filepath.Join(codeDir, name)
 		if err := os.WriteFile(p, data, 0o644); err != nil {
-			return fmt.Errorf("write %s: %v", name, err)
+			return fmt.Errorf("write %s: %v", p, err)
 		}
 		return nil
 	}
@@ -175,7 +178,7 @@ func writeDump(dir string, b *EventBundle) error {
 		}
 	}
 
-	meta := dumpMeta{Code: b.Code, PulledAt: b.PulledAt, Counts: b.Counts}
+	meta := DumpMeta{Code: b.Code, PulledAt: b.PulledAt, Counts: b.Counts}
 	if len(b.Errors) > 0 {
 		meta.Errors = b.Errors
 	}
@@ -187,24 +190,24 @@ func writeDump(dir string, b *EventBundle) error {
 		return err
 	}
 
-	// <dir>/index.json — static-mode discovery (one entry per dumped
-	// event). MERGED with any existing index so a re-dump of one event
-	// keeps the other events the site shows; the current event's entry is
-	// upserted (matched by code) and the list is sorted by start date.
+	// <dir>/index.json — static-mode discovery (one entry per dumped event).
+	// MERGED with any existing index so a re-dump of one event keeps the other
+	// events the site shows; the current event's entry is upserted (matched by
+	// code) and the list is sorted by start date.
 	var ev struct {
 		Title string `json:"title"`
 		Start string `json:"start"`
 		End   string `json:"end"`
 	}
 	_ = json.Unmarshal(b.Event, &ev) // lenient: missing fields → ""
-	entries := []dumpIndexEntry{}
+	entries := []DumpIndexEntry{}
 	if old, rerr := os.ReadFile(filepath.Join(dir, "index.json")); rerr == nil {
 		_ = json.Unmarshal(old, &entries) // unparseable → start fresh
 	}
 	if entries == nil {
-		entries = []dumpIndexEntry{}
+		entries = []DumpIndexEntry{}
 	}
-	entry := dumpIndexEntry{
+	entry := DumpIndexEntry{
 		Code:     b.Code,
 		Title:    ev.Title,
 		Start:    ev.Start,

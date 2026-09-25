@@ -1,14 +1,11 @@
-package main
+package cvent
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 )
@@ -23,7 +20,7 @@ type EventBundle struct {
 
 	// Stale is set by the cache layer at read time when the bundle is older
 	// than 24h. It is NOT a trigger for a re-fetch; the UI shows a badge and a
-	// Re-pull button (which calls invalidate + refetch).
+	// Re-pull button (which calls Invalidate + refetch).
 	Stale bool `json:"stale,omitempty"`
 
 	Event json.RawMessage `json:"event"`
@@ -51,13 +48,13 @@ type EventBundle struct {
 	Errors map[string]string `json:"errors,omitempty"`
 }
 
-// eventCache is the per-event fetch cache. It follows the house-style pattern
+// EventCache is the per-event fetch cache. It follows the house-style pattern
 // (map + mutex, in-flight dedup with a WaitGroup, evict-oldest cap,
 // injectable clock): a second caller arriving while a fetch is in progress
 // waits and reuses the result instead of fanning out a second set of
 // upstream requests.
-type eventCache struct {
-	c *cventClient
+type EventCache struct {
+	c *Client
 
 	mu       sync.Mutex
 	entries  map[string]*bundleEntry // code → cached bundle
@@ -68,7 +65,7 @@ type eventCache struct {
 }
 
 const (
-	eventCacheTTL = 15 * time.Minute // default bundle freshness
+	EventCacheTTL = 15 * time.Minute // default bundle freshness
 	eventCacheCap = 200              // max distinct events held
 	eventNegTTL   = 60 * time.Second // negative-cache window after a failed fetch
 	eventStaleTTL = 24 * time.Hour   // read-time staleness badge threshold
@@ -93,23 +90,24 @@ type eventInflight struct {
 	err    error
 }
 
-func newEventCache(c *cventClient) *eventCache {
-	return &eventCache{
+// NewEventCache builds an EventCache backed by client.
+func NewEventCache(c *Client) *EventCache {
+	return &EventCache{
 		c:        c,
 		entries:  map[string]*bundleEntry{},
 		neg:      map[string]negEntry{},
 		inflight: map[string]*eventInflight{},
-		ttl:      eventCacheTTL,
+		ttl:      EventCacheTTL,
 		now:      time.Now,
 	}
 }
 
-// bundle returns the cached bundle for code when fresh (within TTL),
+// Bundle returns the cached bundle for code when fresh (within TTL),
 // otherwise fetches it. Concurrent callers on the same code are deduped onto
 // the single in-flight fetch; a failed fetch is recorded in the negative
 // cache (60s) so a broken event isn't hammered. Only event-resolution
 // failure surfaces as an error; per-resource failures live in bundle.Errors.
-func (ec *eventCache) bundle(ctx context.Context, code string) (*EventBundle, error) {
+func (ec *EventCache) Bundle(ctx context.Context, code string) (*EventBundle, error) {
 	ec.mu.Lock()
 	now := ec.now()
 	if e, ok := ec.entries[code]; ok && now.Sub(e.at) < ec.ttl {
@@ -162,19 +160,40 @@ func (ec *eventCache) bundle(ctx context.Context, code string) (*EventBundle, er
 	return ec.stamped(b), nil
 }
 
-// invalidate drops the positive cache entry and the negative entry for code,
-// so the next bundle() call re-fetches from upstream. (Task 6's checkin
-// handler calls this after a successful check-in.)
-func (ec *eventCache) invalidate(code string) {
+// Invalidate drops the positive cache entry and the negative entry for code,
+// so the next Bundle call re-fetches from upstream. The check-in handler calls
+// this after a successful check-in.
+func (ec *EventCache) Invalidate(code string) {
 	ec.mu.Lock()
 	defer ec.mu.Unlock()
 	delete(ec.entries, code)
 	delete(ec.neg, code)
 }
 
+// PulledAt returns the cached bundle's pull time for code, if present. It lets
+// the server report a repull's freshness without reaching into the cache
+// internals. ok is false when there is no cached bundle for code.
+func (ec *EventCache) PulledAt(code string) (string, bool) {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	if e, ok := ec.entries[code]; ok && e.bundle != nil {
+		return e.bundle.PulledAt, true
+	}
+	return "", false
+}
+
+// Put inserts a bundle into the cache, bypassing the fetch path (no negative-
+// cache consult, no fan-out). Intended for tests and for seeding after an
+// external write; the entry becomes immediately fresh.
+func (ec *EventCache) Put(code string, b *EventBundle) {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	ec.store(code, b)
+}
+
 // store inserts a fresh entry, evicting the oldest first when the cap is
 // reached. Callers must hold ec.mu.
-func (ec *eventCache) store(code string, b *EventBundle) {
+func (ec *EventCache) store(code string, b *EventBundle) {
 	if len(ec.entries) >= eventCacheCap {
 		ec.evictOldest()
 	}
@@ -183,7 +202,7 @@ func (ec *eventCache) store(code string, b *EventBundle) {
 
 // evictOldest drops the entry with the oldest fetch time. Callers must hold
 // ec.mu.
-func (ec *eventCache) evictOldest() {
+func (ec *EventCache) evictOldest() {
 	var oldestKey string
 	var oldestAt time.Time
 	for k, e := range ec.entries {
@@ -199,7 +218,7 @@ func (ec *eventCache) evictOldest() {
 // maps are deep-copied so caller mutation can never poison the cached entry.
 // Staleness never triggers a re-fetch here — the UI shows the badge and the
 // user can Re-pull.
-func (ec *eventCache) stamped(b *EventBundle) *EventBundle {
+func (ec *EventCache) stamped(b *EventBundle) *EventBundle {
 	cp := *b
 	if t, err := time.Parse(time.RFC3339, b.PulledAt); err == nil {
 		if ec.now().Sub(t) > eventStaleTTL {
@@ -221,12 +240,12 @@ func (ec *eventCache) stamped(b *EventBundle) *EventBundle {
 	return &cp
 }
 
-// eventUUID returns the resolved event uuid for code, read from the cached
+// EventUUID returns the resolved event uuid for code, read from the cached
 // bundle's Event field WITHOUT fetching (no fan-out, no negative cache
-// consult). ok is false when there is no cached bundle or its Event field
-// has no resolvable uuid. Task 6's check-in handler uses this to reach
+// consult). ok is false when there is no cached bundle or its Event field has
+// no resolvable uuid. The check-in handler uses this to reach
 // /events/{uuid}/check-in.
-func (ec *eventCache) eventUUID(code string) (string, bool) {
+func (ec *EventCache) EventUUID(code string) (string, bool) {
 	ec.mu.Lock()
 	defer ec.mu.Unlock()
 	e, ok := ec.entries[code]
@@ -236,7 +255,7 @@ func (ec *eventCache) eventUUID(code string) (string, bool) {
 	var ev struct {
 		ID string `json:"id"`
 	}
-	if err := json.Unmarshal(e.bundle.Event, &ev); err != nil || !isUUID(ev.ID) {
+	if err := json.Unmarshal(e.bundle.Event, &ev); err != nil || !IsUUID(ev.ID) {
 		return "", false
 	}
 	return ev.ID, true
@@ -244,86 +263,17 @@ func (ec *eventCache) eventUUID(code string) (string, bool) {
 
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// isUUID reports whether s looks like a UUID (8-4-4-4-12 hex).
-func isUUID(s string) bool { return uuidRe.MatchString(s) }
-
-// getOnePage fetches a single page (no pagination walk) and returns the
-// event it contains: a list page ({"items":[...]} or {"data":[...]}) yields
-// the first item; a single object with an "id" field (GET /events/{uuid}) is
-// returned as is. Zero matching items → "event not found". Used for
-// code→uuid resolution, where a walk is unsafe (the /events token quirk
-// silently ignores the token param and repeats the page).
-func (c *cventClient) getOnePage(ctx context.Context, path string, extra url.Values) (json.RawMessage, error) {
-	q := url.Values{}
-	q.Set("limit", fmt.Sprint(pageSize))
-	for k, vs := range extra {
-		for _, v := range vs {
-			q.Add(k, v)
-		}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		strings.TrimRight(c.base, "/")+path+"?"+q.Encode(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("cvent %s: %v", path, err)
-	}
-	tok, err := c.token(ctx)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+tok)
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("cvent %s: %v", path, err)
-	}
-	raw, rerr := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	resp.Body.Close()
-	if rerr != nil {
-		return nil, fmt.Errorf("cvent %s: reading body: %v", path, rerr)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("cvent %s: HTTP %d", path, resp.StatusCode)
-	}
-
-	var probe struct {
-		Items *json.RawMessage `json:"items"`
-		Data  *json.RawMessage `json:"data"`
-		ID    *string          `json:"id"`
-	}
-	if err := json.Unmarshal(raw, &probe); err != nil {
-		return nil, fmt.Errorf("cvent %s: decoding response: %v", path, err)
-	}
-	var list *json.RawMessage
-	switch {
-	case probe.Items != nil:
-		list = probe.Items
-	case probe.Data != nil:
-		list = probe.Data
-	}
-	if list != nil {
-		var items []json.RawMessage
-		if err := json.Unmarshal(*list, &items); err != nil {
-			return nil, fmt.Errorf("cvent %s: decoding items: %v", path, err)
-		}
-		if len(items) == 0 {
-			return nil, fmt.Errorf("cvent %s: event not found", path)
-		}
-		return items[0], nil
-	}
-	if probe.ID != nil {
-		return raw, nil // single-object shape (GET /events/{uuid})
-	}
-	return nil, fmt.Errorf("cvent %s: unrecognized response shape (no items, no id)", path)
-}
+// IsUUID reports whether s looks like a UUID (8-4-4-4-12 hex).
+func IsUUID(s string) bool { return uuidRe.MatchString(s) }
 
 // fetchEvent resolves the event (code→uuid via a single-page GET, or uuid
 // directly) and fans out the 12 bundle resources in parallel. Per-resource
 // failures are recorded in Errors (resource field left nil); the bundle is
 // returned as long as the event itself resolved.
-func (ec *eventCache) fetchEvent(ctx context.Context, code string) (*EventBundle, error) {
+func (ec *EventCache) fetchEvent(ctx context.Context, code string) (*EventBundle, error) {
 	var eventRaw json.RawMessage
 	var err error
-	if isUUID(code) {
+	if IsUUID(code) {
 		eventRaw, err = ec.c.getOnePage(ctx, "/events/"+code, nil)
 	} else {
 		eventRaw, err = ec.c.getOnePage(ctx, "/events", url.Values{"filter": {"code eq '" + code + "'"}})

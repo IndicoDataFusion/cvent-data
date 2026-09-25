@@ -1,4 +1,4 @@
-package main
+package cvent
 
 import (
 	"encoding/json"
@@ -34,12 +34,6 @@ type OrderRow struct {
 }
 
 // buildOrder is the tolerant parse shape for one element of the orders array.
-// Field paths mirror components.schemas.order-detail in openapi.json
-// (line ~58668): attendee -> components.schemas.Attendee {id}, plus
-// amountOrdered / amountPaid / amountDue / paymentMethod / invoiceNumber /
-// cancelled / type. The attendee-id lookup is lenient because live payloads
-// vary: order.attendee.id (the spec path) first, then order.contact.id,
-// then a top-level order.attendeeId string; first non-empty wins.
 type buildOrder struct {
 	Attendee struct {
 		ID string `json:"id"`
@@ -58,8 +52,7 @@ type buildOrder struct {
 }
 
 // buildTxn is the tolerant parse shape for one element of the transactions
-// array. Field paths mirror components.schemas.transaction-detail-response
-// in openapi.json (line ~70728): success (bool), paymentType, amount.
+// array.
 type buildTxn struct {
 	Success     bool    `json:"success"`
 	PaymentType string  `json:"paymentType"`
@@ -78,11 +71,11 @@ type buildTxn struct {
 // missing, or the callback returns "", the row falls back to "#<id>" (or
 // "#?" if there is no id at all).
 //
-// Status rules: cancelled orders go to Cancelled; otherwise
-// amountDue <= 0 -> "paid", amountPaid > 0 -> "partial", else "unpaid".
-// Totals sum NON-cancelled orders for ordered/paid/due. Refunded sums
-// transaction amounts where success == true and paymentType contains
-// "Refund"; failed transactions (success == false) never count.
+// Status rules: cancelled orders go to Cancelled; otherwise amountDue <= 0 ->
+// "paid", amountPaid > 0 -> "partial", else "unpaid". Totals sum NON-cancelled
+// orders for ordered/paid/due. Refunded sums transaction amounts where
+// success == true and paymentType contains "Refund"; failed transactions
+// (success == false) never count.
 // Order rows are sorted by amountDue descending (stable, so input order
 // breaks ties) — the most actionable (unpaid) first.
 func BuildPayments(orders, transactions []json.RawMessage, attendeeName func(id string) string) PaymentSummary {

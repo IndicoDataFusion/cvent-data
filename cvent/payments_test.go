@@ -1,4 +1,4 @@
-package main
+package cvent
 
 import (
 	"encoding/json"

@@ -3,18 +3,18 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zhangt58/cvent/cvent"
 )
 
-// cventHandlers serves the /api/cvent/… routes (Task 6, multi-event). Every
-// event-scoped route carries the event code in the path:
+// cventHandlers serves the /api/cvent/… routes. Every event-scoped route
+// carries the event code in the path:
 //
 //	GET  /api/cvent/events/<code>                bundle
 //	GET  /api/cvent/events/<code>/payments
@@ -28,14 +28,14 @@ import (
 // data/index.json and must work even when Cvent credentials are missing.
 type cventHandlers struct {
 	defaultCode string // the --event default; surfaced as the catalog "default"
-	client      *cventClient
-	cache       *eventCache
+	client      *cvent.Client
+	cache       *cvent.EventCache
 
 	mu      sync.Mutex
 	running map[string]bool // code → background repull in flight
 }
 
-func newCventHandlers(defaultCode string, c *cventClient, ec *eventCache) *cventHandlers {
+func newCventHandlers(defaultCode string, c *cvent.Client, ec *cvent.EventCache) *cventHandlers {
 	return &cventHandlers{defaultCode: defaultCode, client: c, cache: ec, running: map[string]bool{}}
 }
 
@@ -82,7 +82,7 @@ func (h *cventHandlers) route(w http.ResponseWriter, r *http.Request) {
 // resolution failed) is a 502 with the message; per-resource failures are
 // NOT errors — they ride inside the bundle's Errors map.
 func (h *cventHandlers) handleEvent(w http.ResponseWriter, r *http.Request, code string) {
-	b, err := h.cache.bundle(r.Context(), code)
+	b, err := h.cache.Bundle(r.Context(), code)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
@@ -93,7 +93,7 @@ func (h *cventHandlers) handleEvent(w http.ResponseWriter, r *http.Request, code
 // handlePayments builds the payment summary over the cached bundle's orders
 // + transactions, joining attendee display names.
 func (h *cventHandlers) handlePayments(w http.ResponseWriter, r *http.Request, code string) {
-	b, err := h.cache.bundle(r.Context(), code)
+	b, err := h.cache.Bundle(r.Context(), code)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
@@ -105,7 +105,7 @@ func (h *cventHandlers) handlePayments(w http.ResponseWriter, r *http.Request, c
 	if len(b.Transactions) > 0 {
 		_ = json.Unmarshal(b.Transactions, &txns)
 	}
-	writeJSON(w, http.StatusOK, BuildPayments(orders, txns, h.attendeeName(b)))
+	writeJSON(w, http.StatusOK, cvent.BuildPayments(orders, txns, h.attendeeName(b)))
 }
 
 // attendeeName builds the id→display-name callback from the bundle's
@@ -118,7 +118,7 @@ func (h *cventHandlers) handlePayments(w http.ResponseWriter, r *http.Request, c
 //
 // Non-empty parts join as "First Middle. Last" (period after middle);
 // no parts → "" and BuildPayments substitutes #id.
-func (h *cventHandlers) attendeeName(b *EventBundle) func(string) string {
+func (h *cventHandlers) attendeeName(b *cvent.EventBundle) func(string) string {
 	names := map[string]string{}
 	if len(b.Attendees) > 0 {
 		var atts []json.RawMessage
@@ -166,7 +166,7 @@ func nameParts(m map[string]any) (first, middle, last string) {
 }
 
 // joinName assembles the parts with a period after the middle name when one
-// is present: "Ada Lovelace", "Ada Byron Lovelace." → "Ada Byron. Lovelace".
+// is present: "Ada Byron Lovelace." → "Ada Byron. Lovelace".
 func joinName(first, middle, last string) string {
 	var parts []string
 	if first != "" {
@@ -207,7 +207,7 @@ func attendeeIDAndName(raw json.RawMessage) (string, string) {
 // to 50 and caps at 200; offset defaults to 0. items are the raw attendee
 // objects.
 func (h *cventHandlers) handleAttendees(w http.ResponseWriter, r *http.Request, code string) {
-	b, err := h.cache.bundle(r.Context(), code)
+	b, err := h.cache.Bundle(r.Context(), code)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
@@ -325,7 +325,7 @@ func (h *cventHandlers) handleCheckin(w http.ResponseWriter, r *http.Request, co
 	// uuid comes from the cached bundle's Event field (same resolution the
 	// bundle used); no fetch here — the UI always reads /events/<code> first,
 	// so a missing cache means nothing to check in against.
-	uuid, ok := h.cache.eventUUID(code)
+	uuid, ok := h.cache.EventUUID(code)
 	if !ok {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "event bundle not cached (fetch /api/cvent/events/" + code + " first)"})
 		return
@@ -336,7 +336,7 @@ func (h *cventHandlers) handleCheckin(w http.ResponseWriter, r *http.Request, co
 	for _, id := range ids {
 		payload = append(payload, map[string]string{"id": id, "checkIn": checkInAt})
 	}
-	status, raw, err := h.postCheckin(r.Context(), uuid, payload)
+	status, raw, err := h.client.Checkin(r.Context(), uuid, payload)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
@@ -349,39 +349,8 @@ func (h *cventHandlers) handleCheckin(w http.ResponseWriter, r *http.Request, co
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": text})
 		return
 	}
-	h.cache.invalidate(code)
+	h.cache.Invalidate(code)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-// postCheckin POSTs the spec's bulk-checkin array to /events/{uuid}/check-in
-// and returns the upstream status and body.
-func (h *cventHandlers) postCheckin(ctx context.Context, uuid string, payload []map[string]string) (int, []byte, error) {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return 0, nil, fmt.Errorf("cvent check-in: %v", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		strings.TrimRight(h.client.base, "/")+"/events/"+uuid+"/check-in", strings.NewReader(string(body)))
-	if err != nil {
-		return 0, nil, fmt.Errorf("cvent check-in: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	tok, err := h.client.token(ctx)
-	if err != nil {
-		return 0, nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+tok)
-
-	resp, err := h.client.http.Do(req)
-	if err != nil {
-		return 0, nil, fmt.Errorf("cvent check-in: %v", err)
-	}
-	raw, rerr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	resp.Body.Close()
-	if rerr != nil {
-		return 0, nil, fmt.Errorf("cvent check-in: reading body: %v", rerr)
-	}
-	return resp.StatusCode, raw, nil
 }
 
 // handleRepull forces a background re-fetch for code: invalidate the cache,
@@ -402,11 +371,11 @@ func (h *cventHandlers) handleRepull(w http.ResponseWriter, r *http.Request, cod
 	h.running[code] = true
 	h.mu.Unlock()
 
-	h.cache.invalidate(code)
+	h.cache.Invalidate(code)
 	fctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 20*time.Second)
 	go func() {
 		defer cancel()
-		_, err := h.cache.bundle(fctx, code)
+		_, err := h.cache.Bundle(fctx, code)
 		if err != nil {
 			log.Printf("cvent repull %s: %v", code, err)
 		}
@@ -426,12 +395,9 @@ func (h *cventHandlers) handleRepullStatus(w http.ResponseWriter, r *http.Reques
 	h.mu.Unlock()
 
 	var pulledAt *string
-	h.cache.mu.Lock()
-	if e, ok := h.cache.entries[code]; ok && e.bundle != nil {
-		s := e.bundle.PulledAt
+	if s, ok := h.cache.PulledAt(code); ok {
 		pulledAt = &s
 	}
-	h.cache.mu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"running":  running,

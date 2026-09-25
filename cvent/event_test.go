@@ -1,4 +1,4 @@
-package main
+package cvent
 
 import (
 	"context"
@@ -160,10 +160,10 @@ func setAllResources200(m *cventMock) {
 
 // newTestEventCache builds a cventClient against the mock (token warm so
 // OAuth round-trips don't pollute request counts) plus a fresh eventCache.
-func newTestEventCache(m *cventMock) *eventCache {
+func newTestEventCache(m *cventMock) *EventCache {
 	c := newCventClient(m.srv.URL, "cid", "secret")
 	warmToken(c)
-	return newEventCache(c)
+	return NewEventCache(c)
 }
 
 // TestEventBundleErrorsIsolated: a full fan-out where every resource endpoint
@@ -326,7 +326,7 @@ func TestEventResolve(t *testing.T) {
 		if got := m.count("/events"); got == 0 {
 			t.Fatalf("code lookup must call GET /events, got %d requests", got)
 		}
-		if got := m.count("/events/"+testUUID); got != 0 {
+		if got := m.count("/events/" + testUUID); got != 0 {
 			t.Fatalf("code lookup must not call GET /events/{uuid}, got %d requests", got)
 		}
 	}
@@ -391,12 +391,12 @@ func TestEventResolve(t *testing.T) {
 // TestCacheTTLAndInFlight pins the cache contract with an injectable TTL and
 // an injectable clock (no real sleeps):
 //
-//   (a) two sequential bundle() calls within the TTL → the upstream is hit
-//       only once (the second call is a cache hit);
-//   (b) two CONCURRENT bundle() calls on a cold cache → the upstream fee-items
-//       endpoint is hit exactly once (in-flight dedup: the second caller waits
-//       and reuses the first fetch);
-//   (c) advancing the injected clock past the TTL → a re-fetch happens.
+//	(a) two sequential bundle() calls within the TTL → the upstream is hit
+//	    only once (the second call is a cache hit);
+//	(b) two CONCURRENT bundle() calls on a cold cache → the upstream fee-items
+//	    endpoint is hit exactly once (in-flight dedup: the second caller waits
+//	    and reuses the first fetch);
+//	(c) advancing the injected clock past the TTL → a re-fetch happens.
 func TestCacheTTLAndInFlight(t *testing.T) {
 	// (a) Sequential within TTL: one upstream fetch.
 	{
@@ -409,11 +409,11 @@ func TestCacheTTLAndInFlight(t *testing.T) {
 		t0 := time.Now()
 		ec.now = func() time.Time { return t0 }
 
-		if _, err := ec.bundle(context.Background(), testCode); err != nil {
+		if _, err := ec.Bundle(context.Background(), testCode); err != nil {
 			t.Fatalf("first bundle(): %v", err)
 		}
 		afterFirst := m.count("/events/" + testUUID + "/fee-items")
-		if _, err := ec.bundle(context.Background(), testCode); err != nil {
+		if _, err := ec.Bundle(context.Background(), testCode); err != nil {
 			t.Fatalf("second bundle(): %v", err)
 		}
 		afterSecond := m.count("/events/" + testUUID + "/fee-items")
@@ -443,7 +443,7 @@ func TestCacheTTLAndInFlight(t *testing.T) {
 			go func(i int) {
 				defer wg.Done()
 				<-start
-				_, errs[i] = ec.bundle(context.Background(), testCode)
+				_, errs[i] = ec.Bundle(context.Background(), testCode)
 			}(i)
 		}
 		close(start) // release both callers onto the cold cache at once
@@ -469,12 +469,12 @@ func TestCacheTTLAndInFlight(t *testing.T) {
 		ec.now = func() time.Time { return cur }
 		cur = time.Now()
 
-		if _, err := ec.bundle(context.Background(), testCode); err != nil {
+		if _, err := ec.Bundle(context.Background(), testCode); err != nil {
 			t.Fatalf("first bundle(): %v", err)
 		}
 		before := m.count("/events/" + testUUID + "/fee-items")
 		cur = cur.Add(16 * time.Minute) // past the 15-minute TTL
-		if _, err := ec.bundle(context.Background(), testCode); err != nil {
+		if _, err := ec.Bundle(context.Background(), testCode); err != nil {
 			t.Fatalf("second bundle() after TTL: %v", err)
 		}
 		after := m.count("/events/" + testUUID + "/fee-items")
@@ -501,12 +501,12 @@ func TestInvalidate(t *testing.T) {
 		t0 := time.Now()
 		ec.now = func() time.Time { return t0 }
 
-		if _, err := ec.bundle(context.Background(), testCode); err != nil {
+		if _, err := ec.Bundle(context.Background(), testCode); err != nil {
 			t.Fatalf("bundle(): %v", err)
 		}
 		before := m.count("/events/" + testUUID + "/fee-items")
-		ec.invalidate(testCode)
-		if _, err := ec.bundle(context.Background(), testCode); err != nil {
+		ec.Invalidate(testCode)
+		if _, err := ec.Bundle(context.Background(), testCode); err != nil {
 			t.Fatalf("bundle() after invalidate: %v", err)
 		}
 		after := m.count("/events/" + testUUID + "/fee-items")
@@ -525,21 +525,21 @@ func TestInvalidate(t *testing.T) {
 		t0 := time.Now()
 		ec.now = func() time.Time { return t0 }
 
-		_, err := ec.bundle(context.Background(), testCode)
+		_, err := ec.Bundle(context.Background(), testCode)
 		if err == nil || !strings.Contains(err.Error(), "event not found") {
 			t.Fatalf("first bundle(): want 'event not found', got %v", err)
 		}
 		before := m.count("/events")
 		// Within the negative window the second call is served from the
 		// negative cache (no new upstream request).
-		if _, err := ec.bundle(context.Background(), testCode); err == nil {
+		if _, err := ec.Bundle(context.Background(), testCode); err == nil {
 			t.Fatal("second bundle(): want error, got nil")
 		}
 		if got := m.count("/events"); got != before {
 			t.Fatalf("negative cache should short-circuit: /events %d → %d (want unchanged)", before, got)
 		}
-		ec.invalidate(testCode)
-		if _, err := ec.bundle(context.Background(), testCode); err == nil {
+		ec.Invalidate(testCode)
+		if _, err := ec.Bundle(context.Background(), testCode); err == nil {
 			t.Fatal("bundle() after invalidate: want error, got nil")
 		}
 		if got := m.count("/events"); got != before+1 {
@@ -560,13 +560,13 @@ func TestStaleFlag(t *testing.T) {
 	t0 := time.Now()
 	ec.now = func() time.Time { return t0 }
 
-	if _, err := ec.bundle(context.Background(), testCode); err != nil {
+	if _, err := ec.Bundle(context.Background(), testCode); err != nil {
 		t.Fatalf("first bundle(): %v", err)
 	}
 	before := m.count("/events/" + testUUID + "/fee-items")
 
 	// Fresh on read.
-	b, err := ec.bundle(context.Background(), testCode)
+	b, err := ec.Bundle(context.Background(), testCode)
 	if err != nil {
 		t.Fatalf("second bundle(): %v", err)
 	}
@@ -583,7 +583,7 @@ func TestStaleFlag(t *testing.T) {
 	ec.ttl = time.Hour
 	t0 = t0.Add(25 * time.Hour)
 	ec.now = func() time.Time { return t0 }
-	if _, err := ec.bundle(context.Background(), testCode); err != nil {
+	if _, err := ec.Bundle(context.Background(), testCode); err != nil {
 		t.Fatalf("bundle() after clock advance: %v", err)
 	}
 	if got := m.count("/events/" + testUUID + "/fee-items"); got == before {
@@ -609,7 +609,7 @@ func TestBundleJSONShape(t *testing.T) {
 		t0 := time.Now()
 		ec.now = func() time.Time { return t0 }
 
-		b, err := ec.bundle(context.Background(), testCode)
+		b, err := ec.Bundle(context.Background(), testCode)
 		if err != nil {
 			t.Fatalf("bundle(): %v", err)
 		}
@@ -656,7 +656,7 @@ func TestBundleJSONShape(t *testing.T) {
 		t0 := time.Now()
 		ec.now = func() time.Time { return t0 }
 
-		b, err := ec.bundle(context.Background(), testCode)
+		b, err := ec.Bundle(context.Background(), testCode)
 		if err != nil {
 			t.Fatalf("bundle(): %v", err)
 		}
@@ -846,7 +846,7 @@ func TestBundleCopyIsolation(t *testing.T) {
 		t0 := time.Now()
 		ec.now = func() time.Time { return t0 }
 
-		b1, err := ec.bundle(context.Background(), testCode) // cold cache → miss
+		b1, err := ec.Bundle(context.Background(), testCode) // cold cache → miss
 		if err != nil {
 			t.Fatalf("first bundle(): %v", err)
 		}
@@ -856,7 +856,7 @@ func TestBundleCopyIsolation(t *testing.T) {
 		}
 		b1.Errors["discounts"] = "tampered"
 
-		b2, err := ec.bundle(context.Background(), testCode) // warm cache → hit
+		b2, err := ec.Bundle(context.Background(), testCode) // warm cache → hit
 		if err != nil {
 			t.Fatalf("second bundle(): %v", err)
 		}
@@ -894,7 +894,7 @@ func TestBundleCopyIsolation(t *testing.T) {
 			go func(i int) {
 				defer wg.Done()
 				<-start
-				bundles[i], errs[i] = ec.bundle(context.Background(), testCode)
+				bundles[i], errs[i] = ec.Bundle(context.Background(), testCode)
 			}(i)
 		}
 		close(start)
@@ -918,7 +918,7 @@ func TestBundleCopyIsolation(t *testing.T) {
 			t.Errorf("caller 1's copy poisoned via caller 2: Errors[discounts] = %q", got)
 		}
 		// A later hit-path read must also be untouched.
-		b3, err := ec.bundle(context.Background(), testCode)
+		b3, err := ec.Bundle(context.Background(), testCode)
 		if err != nil {
 			t.Fatalf("third bundle(): %v", err)
 		}
@@ -940,20 +940,20 @@ func TestIsUUID(t *testing.T) {
 		"ABCDEF01-2345-6789-ABCD-EF0123456789",
 	}
 	for _, s := range yes {
-		if !isUUID(s) {
-			t.Errorf("isUUID(%q) = false, want true", s)
+		if !IsUUID(s) {
+			t.Errorf("IsUUID(%q) = false, want true", s)
 		}
 	}
 	no := []string{
-		testCode,                              // TESTCODE01
-		"4f1c2a9e-7b3d-4e8a-9c21-5d6e7f80a1b", // 35 chars
+		testCode,                               // TESTCODE01
+		"4f1c2a9e-7b3d-4e8a-9c21-5d6e7f80a1b",  // 35 chars
 		"4f1c2a9e_7b3d_4e8a_9c21_5d6e7f80a1b0", // wrong separator
 		"",
 		"4f1c2a9e-7b3d-4e8a-9c21-5d6e7f80a1b01", // 37 chars
 	}
 	for _, s := range no {
-		if isUUID(s) {
-			t.Errorf("isUUID(%q) = true, want false", s)
+		if IsUUID(s) {
+			t.Errorf("IsUUID(%q) = true, want false", s)
 		}
 	}
 }

@@ -9,17 +9,18 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zhangt58/cvent/cvent"
 )
 
-// newTestCventStack spins up an httptest "Cvent" upstream and wires a real
-// cventClient + eventCache + cventHandlers against it, the same way main()
-// does — so the handler tests exercise the real token/paging code paths.
-// The upstream records every request path and returns per-path fixtures.
+// newTestCventStack spins up a real cvent.Client + EventCache against the
+// given httptest "Cvent" upstream and wires a cventHandlers onto them, the
+// same way buildRouter does — so the handler tests exercise the real
+// token/paging code paths.
 func newTestCventStack(t *testing.T, upstream *httptest.Server, eventID string) *cventHandlers {
 	t.Helper()
-	client := newCventClient(upstream.URL, "test-cid", "test-sec")
-	ec := newEventCache(client)
-	ec.ttl = 15 * time.Minute
+	client := cvent.New(upstream.URL, "test-cid", "test-sec")
+	ec := cvent.NewEventCache(client)
 	return newCventHandlers(eventID, client, ec)
 }
 
@@ -71,8 +72,8 @@ func TestCheckinHandlerSuccess(t *testing.T) {
 	upstream, calls := testCventUpstream(t, http.StatusMultiStatus, `[{"id":"att-1"}]`)
 	h := newTestCventStack(t, upstream, "TESTCODE01")
 
-	// Prime the cache so eventUUID() has a resolved event.
-	if _, err := h.cache.bundle(context.Background(), h.defaultCode); err != nil {
+	// Prime the cache so EventUUID() has a resolved event.
+	if _, err := h.cache.Bundle(context.Background(), h.defaultCode); err != nil {
 		t.Fatalf("prime bundle: %v", err)
 	}
 
@@ -87,9 +88,7 @@ func TestCheckinHandlerSuccess(t *testing.T) {
 		t.Fatalf("upstream check-in calls = %d, want 1", got)
 	}
 	// Cache must be invalidated so the next read re-fetches.
-	// (We can't observe the fetch directly here without a counter on
-	// /events, but eventUUID must now be false: the entry is gone.)
-	if _, ok := h.cache.eventUUID(h.defaultCode); ok {
+	if _, ok := h.cache.EventUUID(h.defaultCode); ok {
 		t.Fatalf("cache was not invalidated after check-in")
 	}
 }
@@ -146,7 +145,7 @@ func TestCheckinHandlerNoCache(t *testing.T) {
 func TestCheckinHandlerUpstreamError(t *testing.T) {
 	upstream, _ := testCventUpstream(t, http.StatusForbidden, `{"error":"missing scope"}`)
 	h := newTestCventStack(t, upstream, "TESTCODE01")
-	if _, err := h.cache.bundle(context.Background(), h.defaultCode); err != nil {
+	if _, err := h.cache.Bundle(context.Background(), h.defaultCode); err != nil {
 		t.Fatalf("prime bundle: %v", err)
 	}
 	code, out := doCheckin(t, h, `{"attendeeIds":["att-1"]}`)
@@ -157,7 +156,7 @@ func TestCheckinHandlerUpstreamError(t *testing.T) {
 		t.Fatalf("error = %v, want upstream error text", out["error"])
 	}
 	// On Cvent error the cache must NOT be invalidated.
-	if _, ok := h.cache.eventUUID(h.defaultCode); !ok {
+	if _, ok := h.cache.EventUUID(h.defaultCode); !ok {
 		t.Fatalf("cache must survive a failed check-in")
 	}
 }
@@ -180,10 +179,10 @@ func itoa(i int) string {
 
 func TestAttendeesSearchAndPaging(t *testing.T) {
 	// Build a bundle directly (no upstream needed for the search logic).
-	client := newCventClient("http://127.0.0.1:0", "c", "s")
-	ec := newEventCache(client)
+	client := cvent.New("http://127.0.0.1:0", "c", "s")
+	ec := cvent.NewEventCache(client)
 	h := newCventHandlers("TESTCODE01", client, ec)
-	b := &EventBundle{Code: "TESTCODE01", PulledAt: time.Now().UTC().Format(time.RFC3339)}
+	b := &cvent.EventBundle{Code: "TESTCODE01", PulledAt: time.Now().UTC().Format(time.RFC3339)}
 	b.Event = json.RawMessage(`{"id":"` + testCheckinUUID + `"}`)
 	b.Attendees = json.RawMessage(`[
 		{"id":"a1","confirmationNumber":"CONF123","contact":{"firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}},
@@ -191,9 +190,7 @@ func TestAttendeesSearchAndPaging(t *testing.T) {
 		{"id":"a3","name":{"firstName":"Alan","middleName":"M.","lastName":"Turing"},"contact":{"email":"alan@example.com"}},
 		{"id":"a4","confirmationNumber":"CONF789","contact":{"firstName":"Edsger","lastName":"Dijkstra","email":"edsger@example.com"}}
 	]`)
-	ec.mu.Lock()
-	ec.store(h.defaultCode, b)
-	ec.mu.Unlock()
+	ec.Put(h.defaultCode, b)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/cvent/events/TESTCODE01/attendees?q=lovel", nil)
 	rec := httptest.NewRecorder()
@@ -275,14 +272,12 @@ func TestAttendeeNameJoining(t *testing.T) {
 }
 
 func TestPaymentsHandlerZeroRows(t *testing.T) {
-	client := newCventClient("http://127.0.0.1:0", "c", "s")
-	ec := newEventCache(client)
+	client := cvent.New("http://127.0.0.1:0", "c", "s")
+	ec := cvent.NewEventCache(client)
 	h := newCventHandlers("TESTCODE01", client, ec)
-	b := &EventBundle{Code: "TESTCODE01", PulledAt: time.Now().UTC().Format(time.RFC3339)}
+	b := &cvent.EventBundle{Code: "TESTCODE01", PulledAt: time.Now().UTC().Format(time.RFC3339)}
 	b.Event = json.RawMessage(`{"id":"` + testCheckinUUID + `"}`)
-	ec.mu.Lock()
-	ec.store(h.defaultCode, b)
-	ec.mu.Unlock()
+	ec.Put(h.defaultCode, b)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/cvent/events/TESTCODE01/payments", nil)
 	rec := httptest.NewRecorder()
@@ -290,7 +285,7 @@ func TestPaymentsHandlerZeroRows(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
 	}
-	var sum PaymentSummary
+	var sum cvent.PaymentSummary
 	if err := json.Unmarshal(rec.Body.Bytes(), &sum); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -347,7 +342,7 @@ func TestRepullStatusAndRepull(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if _, err := h.cache.bundle(context.Background(), h.defaultCode); err != nil {
+	if _, err := h.cache.Bundle(context.Background(), h.defaultCode); err != nil {
 		t.Fatalf("post-repull bundle: %v", err)
 	}
 
@@ -364,8 +359,8 @@ func TestRepullStatusAndRepull(t *testing.T) {
 }
 
 func TestRouteNotFound(t *testing.T) {
-	client := newCventClient("http://127.0.0.1:0", "c", "s")
-	h := newCventHandlers("TESTCODE01", client, newEventCache(client))
+	client := cvent.New("http://127.0.0.1:0", "c", "s")
+	h := newCventHandlers("TESTCODE01", client, cvent.NewEventCache(client))
 	req := httptest.NewRequest(http.MethodGet, "/api/cvent/events/TESTCODE01/nope", nil)
 	rec := httptest.NewRecorder()
 	h.route(rec, req)

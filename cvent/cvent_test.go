@@ -1,4 +1,4 @@
-package main
+package cvent
 
 import (
 	"context"
@@ -175,22 +175,22 @@ func TestLoadCventEnv(t *testing.T) {
 	t.Setenv("CVENT_API_BASE", "")
 
 	// Walking up from a subdirectory finds the root .env.
-	cid, sec, base, err := loadCventEnvFrom(sub)
+	cred, err := FromEnvironmentFrom(sub)
 	if err != nil {
-		t.Fatalf("loadCventEnvFrom: %v", err)
+		t.Fatalf("FromEnvironmentFrom: %v", err)
 	}
-	if cid != "filecid" || sec != secret || base != "https://example.test/ea" {
+	if cid, sec, base := cred.ClientID, cred.ClientSecret, cred.BaseURL; cid != "filecid" || sec != secret || base != "https://example.test/ea" {
 		t.Fatalf("got (%q, %q, %q), want (filecid, %q, https://example.test/ea)", cid, sec, base, secret)
 	}
 
 	// Real environment variables take precedence over .env values.
 	t.Setenv("CVENT_CLIENT_ID", "envcid")
 	t.Setenv("CVENT_API_BASE", "https://env.test/ea")
-	cid, sec, base, err = loadCventEnvFrom(sub)
+	cred, err = FromEnvironmentFrom(sub)
 	if err != nil {
-		t.Fatalf("loadCventEnvFrom (env override): %v", err)
+		t.Fatalf("FromEnvironmentFrom (env override): %v", err)
 	}
-	if cid != "envcid" || sec != secret || base != "https://env.test/ea" {
+	if cid, sec, base := cred.ClientID, cred.ClientSecret, cred.BaseURL; cid != "envcid" || sec != secret || base != "https://env.test/ea" {
 		t.Fatalf("got (%q, %q, %q), want (envcid, %q, https://env.test/ea)", cid, sec, base, secret)
 	}
 
@@ -202,9 +202,9 @@ func TestLoadCventEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("CVENT_CLIENT_ID", "") // simulate unset
-	_, _, _, err = loadCventEnvFrom(empty)
+	_, err = FromEnvironmentFrom(empty)
 	if err == nil {
-		t.Fatal("loadCventEnvFrom with missing CVENT_CLIENT_ID: want error, got nil")
+		t.Fatal("FromEnvironmentFrom with missing CVENT_CLIENT_ID: want error, got nil")
 	}
 	if !strings.Contains(err.Error(), "CVENT_CLIENT_ID") {
 		t.Fatalf("error should name the missing variable: %v", err)
@@ -301,7 +301,7 @@ func listPage(ids []string, total int, token string) []byte {
 
 // warmToken seeds the client's token cache so data-request counts in these
 // tests are exact (no OAuth round-trips); token() itself is covered in Task 2.
-func warmToken(c *cventClient) {
+func warmToken(c *Client) {
 	c.tok = "tok-1"
 	c.exp = time.Now().Add(time.Hour)
 }

@@ -25,9 +25,9 @@ func newStaticTestServer(t *testing.T, webDir, dataDir string) (*server, *httpte
 
 func TestCventMissingCreds(t *testing.T) {
 	// Deterministic "no credentials" setup:
-	//  1. t.Chdir into a temp dir so loadCventEnv's up-walk from cwd finds no
-	//     .env (the repo-root .env is left behind; no ancestor of the temp dir
-	//     defines CVENT_CLIENT_ID).
+	//  1. t.Chdir into a temp dir so cvent.FromEnvironment's up-walk from cwd
+	//     finds no .env (the repo-root .env is left behind; no ancestor of the
+	//     temp dir defines CVENT_CLIENT_ID).
 	//  2. t.Setenv the CVENT_* vars to "" so a dev shell exporting real creds
 	//     cannot leak in (envOr treats empty as unset).
 	t.Chdir(t.TempDir())
@@ -95,7 +95,7 @@ func TestCventMissingCreds(t *testing.T) {
 		t.Errorf("GET /api/cvent/events: status = %d, want 200 (body %q)", code, body)
 	}
 	var cat struct {
-		Events  []any `json:"events"`
+		Events  []any  `json:"events"`
 		Default string `json:"default"`
 	}
 	if err := json.Unmarshal([]byte(body), &cat); err != nil {

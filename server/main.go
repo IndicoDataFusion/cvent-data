@@ -3,12 +3,15 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/zhangt58/cvent/cvent"
 )
 
 // buildSHA is the git commit SHA at build time, injected via
@@ -346,11 +349,11 @@ func buildRouter(s *server) http.Handler {
 	// router finds it and handleAPI's nil-client branch answers 503 "cvent
 	// credentials not configured" for every /api/cvent/… route. Static serving
 	// and /api/health keep working either way.
-	if cid, sec, base, err := loadCventEnv(); err != nil {
+	if creds, err := cvent.FromEnvironment(); err != nil {
 		log.Printf("cvent: %v — /api/cvent/… will return 503 until credentials are configured", err)
 	} else {
-		client := newCventClient(base, cid, sec)
-		s.cvent = newCventHandlers(s.eventID, client, newEventCache(client))
+		client := cvent.NewWithCredentials(creds)
+		s.cvent = newCventHandlers(s.eventID, client, cvent.NewEventCache(client))
 	}
 	sources["cvent"] = func(srv *server, w http.ResponseWriter, r *http.Request) {
 		srv.cvent.route(w, r)
@@ -388,7 +391,18 @@ func main() {
 	// the snapshot, and exit. Missing credentials are fatal here (no
 	// server-start fallback).
 	if dumpDir != "" {
-		os.Exit(runDump(eventID, dumpDir))
+		creds, err := cvent.FromEnvironment()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dump: %v\n", err)
+			os.Exit(1)
+		}
+		summary, err := cvent.RunDump(creds, eventID, dumpDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dump: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(summary)
+		os.Exit(0)
 	}
 
 	s := &server{webDir: webDir, dataDir: dataDir, eventID: eventID}
