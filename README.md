@@ -29,6 +29,48 @@ curl -s "https://api-platform.cvent.com/ea/events?limit=5" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+## Use as a Go library
+
+```bash
+go get github.com/IndicoDataFusion/cvent-data@latest
+```
+
+The `cvent` package has no dependencies beyond the standard library. To
+read an event's attendees for matching against another system (this is
+how [IndicoDataFusion](https://github.com/IndicoDataFusion/IDF) pairs Cvent
+attendees with Indico registrations):
+
+```go
+import "github.com/IndicoDataFusion/cvent-data/cvent"
+
+c := cvent.New(cvent.DefaultBaseURL, clientID, clientSecret)
+atts, err := cvent.FetchRegistrants(ctx, c, "EXAMPLECODE", cvent.RegistrantsOptions{
+	WithPayments: true, // also read orders + transactions
+})
+for _, a := range atts {
+	// a.FullName, a.Email, a.Status, a.Ref (the Indico Ref # answer, trimmed),
+	// a.Payment (nil without an order): Status is paid | partial | unpaid |
+	// waived | cancelled, plus Ordered/Paid/Due/Refunded, Currency, Method,
+	// LastPaymentDate, Invoices, Discounts and OriginalAmount (before discounts).
+}
+```
+
+- `FetchRegistrants` resolves a short event code or uuid, then fetches only
+  attendees and event questions (plus orders and transactions with
+  `WithPayments`), not the full bundle.
+- `Ref` is the answer to the question whose text matches
+  `DefaultRefQuestionPattern` ("Indico … Ref"/"reference"); pin another
+  question with `RegistrantsOptions.RefQuestionID`.
+- Payment status rules: every order cancelled → `cancelled`; nothing
+  charged (e.g. a 100% discount) → `waived`; nothing due → `paid`; some
+  paid → `partial`; otherwise `unpaid`. Orders carry no currency, so it
+  comes from the transactions, else the event.
+- Pure helpers for data you already hold: `RegistrantsFrom`,
+  `RefQuestionID`, `PaymentsByAttendee`, and `BuildPayments` (the event-wide
+  money view). `FromEnvironment` reads credentials from the environment or
+  a `.env`; `NewEventCache(c).Bundle(ctx, code)` returns the full 13-resource
+  bundle.
+
 ---
 
 ## Cvent Data PWA
