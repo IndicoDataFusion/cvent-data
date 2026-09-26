@@ -39,9 +39,9 @@ type assetTable struct {
 	byOriginal map[string]string // "styles.css" -> "styles.<sha1>.css"
 	byHashed   map[string]string // "styles.<sha1>.css" -> "styles.css"
 	served     map[string][]byte // original path -> the bytes the server must
-	                            // serve (import specifiers rewritten to the
-	                            // hashed names); the on-disk file is untouched
-	static     []string // all other files, sorted ("icons/icon-192.png", "sw.js", ...)
+	// serve (import specifiers rewritten to the
+	// hashed names); the on-disk file is untouched
+	static []string // all other files, sorted ("icons/icon-192.png", "sw.js", ...)
 }
 
 // loadAssets walks webDir and builds the hash table. A missing webDir
@@ -60,7 +60,10 @@ func loadAssets(webDir string) (*assetTable, error) {
 		byHashed:   map[string]string{},
 		served:     map[string][]byte{},
 	}
-	type jsAsset struct{ rel, dir string; body []byte }
+	type jsAsset struct {
+		rel, dir string
+		body     []byte
+	}
 	var jsFiles []jsAsset
 	err := filepath.WalkDir(webDir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
