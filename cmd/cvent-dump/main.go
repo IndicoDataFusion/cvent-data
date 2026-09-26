@@ -17,7 +17,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/zhangt58/cvent/cvent"
+	"github.com/IndicoDataFusion/cvent-data/cvent"
 )
 
 func main() {

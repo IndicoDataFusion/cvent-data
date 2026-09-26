@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zhangt58/cvent/cvent"
+	"github.com/IndicoDataFusion/cvent-data/cvent"
 )
 
 // cventHandlers serves the /api/cvent/… routes. Every event-scoped route

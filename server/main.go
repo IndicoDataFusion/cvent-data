@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhangt58/cvent/cvent"
+	"github.com/IndicoDataFusion/cvent-data/cvent"
 )
 
 // buildSHA is the git commit SHA at build time, injected via

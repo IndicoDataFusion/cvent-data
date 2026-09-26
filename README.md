@@ -1,7 +1,7 @@
 # cvent-data
 
 Client, tests, and reference material for the Cvent Platform REST API, plus
-a PWA for browsing event data. Go module `github.com/zhangt58/cvent`.
+a PWA for browsing event data. Go module `github.com/IndicoDataFusion/cvent-data`.
 
 - `cvent/` — Go package (stdlib only): credentials, API client, event
   bundle cache, payments join, snapshot dumps.

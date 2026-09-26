@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhangt58/cvent/cvent"
+	"github.com/IndicoDataFusion/cvent-data/cvent"
 )
 
 // newTestCventStack spins up a real cvent.Client + EventCache against the
