@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.1.1 — 2026-09-26
 
 - Remove `run.sh`. It skipped rebuilds once a binary existed and listened on
   all interfaces by default. `make serve ADDR=0.0.0.0:8766` replaces its LAN
