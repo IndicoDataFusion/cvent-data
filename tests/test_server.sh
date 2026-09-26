@@ -4,7 +4,7 @@
 # The suite runs the REAL cvent-data-server against a LOCAL MOCK Cvent
 # upstream (tests/make_fixture.py --serve): CVENT_API_BASE points at the
 # mock, so every /api/cvent/* response is produced by the server's real
-# code paths (event resolution, 12-resource fan-out, payments, attendee
+# code paths (event resolution, 13-resource fan-out, payments, attendee
 # search, static/SPA serving). NO live network calls: the mock's access
 # log is asserted to show only local paths.
 #
@@ -141,7 +141,7 @@ PY
 # --- 2. bundle: fan-out end-to-end against the mock ---------------------------
 code=$(curl -s -o "$WORK/bundle.json" -w '%{http_code}' "$BASE/api/cvent/events/syn-event")
 [ "$code" = "200" ]; check $? "/api/cvent/events/syn-event -> 200 (got $code)"
-python3 - "$WORK/bundle.json" <<'PY' && pass "bundle: 12 count keys, attendees=5, title ok" \
+python3 - "$WORK/bundle.json" <<'PY' && pass "bundle: 13 count keys, attendees=5, title ok" \
   || die "bundle payload wrong"
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -152,9 +152,10 @@ c = d["counts"]
 expected_keys = {"attendees", "activities", "orders", "orderItems",
                  "transactions", "transactionItems", "feeItems",
                  "admissionItems", "registrationTypes", "discounts",
-                 "sessions", "speakers"}
+                 "sessions", "speakers", "eventQuestions"}
 assert expected_keys <= set(c), f"missing count keys: {expected_keys - set(c)}"
-assert len(expected_keys & set(c)) == 12, f"expected exactly 12 count keys, got {len(expected_keys & set(c))}"
+assert len(expected_keys & set(c)) == 13, f"expected exactly 13 count keys, got {len(expected_keys & set(c))}"
+assert c["eventQuestions"] == 3, f"counts.eventQuestions != 3: {c['eventQuestions']}"
 assert c["attendees"] == 5, f"counts.attendees != 5: {c['attendees']}"
 # non-empty fan-out resources the fixture populates
 for k, n in [("orders", 3), ("transactions", 3), ("feeItems", 2),
@@ -190,7 +191,7 @@ PY
 code=$(curl -s -o "$WORK/att_zeta.json" -w '%{http_code}' \
   "$BASE/api/cvent/events/syn-event/attendees?q=zeta")
 [ "$code" = "200" ]; check $? "/api/cvent/events/syn-event/attendees?q=zeta -> 200 (got $code)"
-python3 - "$WORK/att_zeta.json" <<'PY' && pass "q=zeta -> total 2, items 2" || die "q=zeta wrong"
+python3 - "$WORK/att_zeta.json" <<'PY' && pass "q=zeta -> total 2, items 2, answered questions labelled" || die "q=zeta wrong"
 import json, sys
 d = json.load(open(sys.argv[1]))
 # "zeta" matches EXACTLY 2 attendees: Alice Zetar (name.lastName) and Bob
@@ -200,6 +201,11 @@ assert d["total"] == 2, f"total != 2: {d['total']}"
 assert len(d["items"]) == 2, f"items != 2"
 ids = sorted(i["id"] for i in d["items"])
 assert ids == ["att-001", "att-002"], ids
+# questions: id -> {text, type} for exactly the answered questions (Alice's
+# two); the unanswered SL_* system field is left out.
+qs = d["questions"]
+assert set(qs) == {"q-terms", "q-first"}, qs
+assert qs["q-first"] == {"text": "First time attending", "type": "SingleChoice"}, qs
 PY
 
 code=$(curl -s -o "$WORK/att_nomatch.json" -w '%{http_code}' \

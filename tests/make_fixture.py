@@ -10,7 +10,7 @@ One file, stdlib only. Two jobs:
      DIR/index.json                     [ {code, title, start, end, pulledAt} ]
      DIR/<code>/event.json              the event object
      DIR/<code>/meta.json               {code, pulledAt, counts}
-     DIR/<code>/<12 resource files>     raw JSON arrays (literal null when
+     DIR/<code>/<13 resource files>     raw JSON arrays (literal null when
                                         empty — matches server/dump.go)
 
 2. Mock Cvent API: `python3 make_fixture.py --out DIR --serve PORT` (blocks).
@@ -52,7 +52,7 @@ PULLED_AT = "2026-09-22T00:00:00Z"
 RESOURCE_KEYS = [
     "attendees", "activities", "orders", "orderItems", "transactions",
     "transactionItems", "feeItems", "admissionItems", "registrationTypes",
-    "discounts", "sessions", "speakers",
+    "discounts", "sessions", "speakers", "eventQuestions",
 ]
 
 # dump file name per resource key (server/dump.go layout; same names
@@ -70,6 +70,7 @@ RESOURCE_FILES = {
     "discounts": "discounts.json",
     "sessions": "sessions.json",
     "speakers": "speakers.json",
+    "eventQuestions": "event-questions.json",
 }
 
 
@@ -118,7 +119,7 @@ def _attendee(uuid, title, aid, first, last, conf, email=None, placement="name")
 
 
 def _build_syn_event():
-    """The original synthetic event's 12 resources (ground truth in the
+    """The original synthetic event's 13 resources (ground truth in the
     module docstring)."""
     uuid = "00000000-1111-4222-8333-000000000001"
     title = "Synthetic Test Event"
@@ -130,6 +131,17 @@ def _build_syn_event():
                   email="carol@example.org", placement="contact"),
         _attendee(uuid, title, "att-004", "Dan", "Okafor", "CONF-0004"),
         _attendee(uuid, title, "att-005", "Erin", "Kowalski", "CONF-0005"),
+    ]
+    # Registration answers reference questions by id only; eventQuestions
+    # resolves them (q-sys is an SL_* system field nobody answers).
+    attendees[0]["answers"] = [
+        {"question": {"id": "q-terms"}, "value": ["I accept the terms."]},
+        {"question": {"id": "q-first"}, "value": ["Yes"]},
+    ]
+    event_questions = [
+        {"id": "q-terms", "text": "Terms and Conditions", "type": "MultiChoice", "event": {"id": uuid}},
+        {"id": "q-first", "text": "First time attending", "type": "SingleChoice", "event": {"id": uuid}},
+        {"id": "q-sys", "text": "SL_DURATION11", "type": "OpenEndedTextOneLine", "event": {"id": uuid}},
     ]
 
     ev = {"id": uuid}
@@ -254,6 +266,7 @@ def _build_syn_event():
         "discounts": discounts,
         "sessions": sessions,
         "speakers": speakers,
+        "eventQuestions": event_questions,
     }
 
 
@@ -331,6 +344,7 @@ def _build_syn_event_2():
         "discounts": discounts,
         "sessions": sessions,
         "speakers": speakers,
+        "eventQuestions": [],
     }
 
 
@@ -500,6 +514,12 @@ def make_handler():
                 if m.group(2) in table:
                     self._send(_page(res[table[m.group(2)]]))
                     return
+            if path == "/event-questions":
+                filt = (q.get("filter") or [""])[0]
+                mm = _UUID_RE.search(filt)
+                res = _resources_for_uuid(mm.group(1)) if mm else None
+                self._send(_page(res["eventQuestions"] if res else []))
+                return
             if path == "/attendees/activities":
                 # filter arrives as a QUERY PARAM here (not a POST body)
                 filt = (q.get("filter") or [""])[0]

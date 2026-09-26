@@ -129,7 +129,7 @@ func (m *cventMock) setEventEndpoints() {
 	m.setSingle("/events/"+testUUID, eventObjectBody(testUUID, testCode))
 }
 
-// allResourcePaths returns the 12 fan-out paths for the test event, in
+// allResourcePaths returns the 13 fan-out paths for the test event, in
 // eventResources order, for use as a lookup set.
 func allResourcePaths() map[string]bool {
 	paths := map[string]bool{
@@ -145,11 +145,12 @@ func allResourcePaths() map[string]bool {
 		"/events/" + testUUID + "/orders/items":       true,
 		"/events/" + testUUID + "/transactions":       true,
 		"/events/" + testUUID + "/transactions/items": true,
+		"/event-questions":                            true,
 	}
 	return paths
 }
 
-// setAllResources200 makes every one of the 12 fan-out endpoints return a
+// setAllResources200 makes every one of the 13 fan-out endpoints return a
 // 2-item 200 page. The totalCount (2) equals the number of items so the
 // walk stops after a single request per resource.
 func setAllResources200(m *cventMock) {
@@ -201,7 +202,7 @@ func TestEventBundleErrorsIsolated(t *testing.T) {
 		t.Fatalf("Errors should have exactly 1 entry (discounts), got %d: %v", len(b.Errors), b.Errors)
 	}
 
-	// The other 11 fields are populated (non-nil) and carry 2 items each.
+	// The other 12 fields are populated (non-nil) and carry 2 items each.
 	populated := map[string]json.RawMessage{
 		"registrationTypes": b.RegistrationTypes,
 		"admissionItems":    b.AdmissionItems,
@@ -214,6 +215,7 @@ func TestEventBundleErrorsIsolated(t *testing.T) {
 		"orderItems":        b.OrderItems,
 		"transactions":      b.Transactions,
 		"transactionItems":  b.TransactionItems,
+		"eventQuestions":    b.EventQuestions,
 	}
 	for name, raw := range populated {
 		if raw == nil {
@@ -227,9 +229,9 @@ func TestEventBundleErrorsIsolated(t *testing.T) {
 	if got := b.Counts["discounts"]; got != 0 {
 		t.Errorf("Counts[discounts] = %d, want 0 (fetch failed)", got)
 	}
-	// Counts must carry all 12 keys.
-	if len(b.Counts) != 12 {
-		t.Errorf("Counts has %d keys, want exactly 12: %v", len(b.Counts), b.Counts)
+	// Counts must carry all 13 keys.
+	if len(b.Counts) != 13 {
+		t.Errorf("Counts has %d keys, want exactly 13: %v", len(b.Counts), b.Counts)
 	}
 	if b.Discounts != nil {
 		t.Errorf("bundle.Discounts should be nil after a failed fetch, got %s", b.Discounts)
@@ -280,7 +282,7 @@ func TestEventResourceTokenIgnored(t *testing.T) {
 	if got := b.Counts["activities"]; got != 0 {
 		t.Errorf("Counts[activities] = %d, want 0 (fetch failed)", got)
 	}
-	// The other 11 fields are populated.
+	// The other 12 fields are populated.
 	populated := map[string]json.RawMessage{
 		"registrationTypes": b.RegistrationTypes,
 		"admissionItems":    b.AdmissionItems,
@@ -293,6 +295,7 @@ func TestEventResourceTokenIgnored(t *testing.T) {
 		"orderItems":        b.OrderItems,
 		"transactions":      b.Transactions,
 		"transactionItems":  b.TransactionItems,
+		"eventQuestions":    b.EventQuestions,
 	}
 	for name, raw := range populated {
 		if raw == nil {
@@ -319,8 +322,8 @@ func TestEventResolve(t *testing.T) {
 		if b.Code != testCode {
 			t.Fatalf("bundle.Code = %q, want %q", b.Code, testCode)
 		}
-		if len(b.Counts) != 12 {
-			t.Fatalf("Counts has %d keys, want 12", len(b.Counts))
+		if len(b.Counts) != 13 {
+			t.Fatalf("Counts has %d keys, want 13", len(b.Counts))
 		}
 		// The code lookup must have hit /events (not /events/{uuid}).
 		if got := m.count("/events"); got == 0 {
@@ -599,7 +602,7 @@ func TestStaleFlag(t *testing.T) {
 //   - the 24h-old Stale flag is omitted when false and present when true;
 //   - Errors is omitted when there are no per-resource errors.
 func TestBundleJSONShape(t *testing.T) {
-	// A clean bundle (all 12 resources populated, no errors, fresh).
+	// A clean bundle (all 13 resources populated, no errors, fresh).
 	{
 		m := newCventMock(t)
 		m.setEventEndpoints()
@@ -623,6 +626,7 @@ func TestBundleJSONShape(t *testing.T) {
 			`"registrationTypes"`, `"admissionItems"`, `"feeItems"`, `"discounts"`,
 			`"sessions"`, `"speakers"`, `"attendees"`, `"activities"`,
 			`"orders"`, `"orderItems"`, `"transactions"`, `"transactionItems"`,
+			`"eventQuestions"`,
 		} {
 			if !strings.Contains(s, key) {
 				t.Errorf("bundle JSON missing %s: %s", key, s)
@@ -750,14 +754,15 @@ func TestGetOnePageShapes(t *testing.T) {
 	}
 }
 
-// TestFetchEventCountsAlways12Keys pins the uniform badge contract: Counts
-// always carries exactly the 12 resource keys, with 0 for any empty or failed
+// TestFetchEventCountsAlways13Keys pins the uniform badge contract: Counts
+// always carries exactly the 13 resource keys, with 0 for any empty or failed
 // resource (the UI's badge logic relies on every key being present).
-func TestFetchEventCountsAlways12Keys(t *testing.T) {
+func TestFetchEventCountsAlways13Keys(t *testing.T) {
 	want := []string{
 		"registrationTypes", "admissionItems", "feeItems", "discounts",
 		"sessions", "speakers", "attendees", "activities",
 		"orders", "orderItems", "transactions", "transactionItems",
+		"eventQuestions",
 	}
 	// All empty: every resource returns a zero-item page.
 	{
@@ -771,8 +776,8 @@ func TestFetchEventCountsAlways12Keys(t *testing.T) {
 		if err != nil {
 			t.Fatalf("fetchEvent: %v", err)
 		}
-		if len(b.Counts) != 12 {
-			t.Fatalf("Counts has %d keys, want 12", len(b.Counts))
+		if len(b.Counts) != 13 {
+			t.Fatalf("Counts has %d keys, want 13", len(b.Counts))
 		}
 		for _, k := range want {
 			if _, ok := b.Counts[k]; !ok {
@@ -785,9 +790,9 @@ func TestFetchEventCountsAlways12Keys(t *testing.T) {
 	}
 }
 
-// TestEventResourceSet pins that the fan-out fetches exactly the 12 resources
-// (one request per path) and no others — the 16-resource superset in the plan
-// (registration-paths, event-questions, emails) is NOT fetched.
+// TestEventResourceSet pins that the fan-out fetches exactly the 13 resources
+// (one request per path) and no others — the rest of the plan's superset
+// (registration-paths, emails) is NOT fetched.
 func TestEventResourceSet(t *testing.T) {
 	m := newCventMock(t)
 	m.setEventEndpoints()
@@ -809,6 +814,7 @@ func TestEventResourceSet(t *testing.T) {
 		"/events/" + testUUID + "/orders/items":       1,
 		"/events/" + testUUID + "/transactions":       1,
 		"/events/" + testUUID + "/transactions/items": 1,
+		"/event-questions":                            1,
 	} {
 		if got := m.count(path); got != want {
 			t.Errorf("GET/POST %s hit %d times, want %d", path, got, want)
@@ -817,7 +823,6 @@ func TestEventResourceSet(t *testing.T) {
 	// The skipped resources must have zero requests.
 	for path := range map[string]bool{
 		"/events/" + testUUID + "/registration-paths": true,
-		"/events/" + testUUID + "/event-questions":    true,
 		"/events/" + testUUID + "/emails":             true,
 	} {
 		if got := m.count(path); got != 0 {

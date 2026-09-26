@@ -33,8 +33,12 @@ const RESOURCE_FILES = {
   orderItems: "order-items.json",
   transactions: "transactions.json",
   transactionItems: "transaction-items.json",
+  eventQuestions: "event-questions.json",
 };
 const RESOURCES = Object.keys(RESOURCE_FILES);
+// Resources older dumps may lack: a missing file loads as "no rows" instead
+// of failing the whole snapshot.
+const OPTIONAL_RESOURCES = new Set(["eventQuestions"]);
 
 const STATIC =
   (typeof location !== "undefined" &&
@@ -106,7 +110,10 @@ async function getEventStatic(code) {
   const [meta, event, ...raws] = await Promise.all([
     fetchJSON(dir + "meta.json"),
     fetchJSON(dir + "event.json"),
-    ...RESOURCES.map((k) => fetchJSON(dir + RESOURCE_FILES[k])),
+    ...RESOURCES.map((k) => {
+      const p = fetchJSON(dir + RESOURCE_FILES[k]);
+      return OPTIONAL_RESOURCES.has(k) ? p.catch(() => null) : p;
+    }),
   ]);
   const bundle = assembleStaticBundle(entry, meta, event, raws);
   staticBundles.set(bundle.code, bundle);
@@ -185,6 +192,23 @@ function attendeeHaystack(a) {
   return parts.join(" ").toLowerCase();
 }
 
+// question id → {text, type} for the questions these attendees answered —
+// the static-mode twin of the server's answeredQuestions (handlers.go).
+function answeredQuestions(eventQuestions, items) {
+  const byId = new Map();
+  (Array.isArray(eventQuestions) ? eventQuestions : []).forEach((q) => {
+    if (q && q.id) byId.set(q.id, { text: q.text || "", type: q.type || "" });
+  });
+  const out = {};
+  items.forEach((a) => {
+    ((a && a.answers) || []).forEach((ans) => {
+      const id = ans && ans.question && ans.question.id;
+      if (id && byId.has(id)) out[id] = byId.get(id);
+    });
+  });
+  return out;
+}
+
 // Attendee search for code (live: /api/cvent/events/<code>/attendees
 // ?q=&limit=&offset=; static: the same filter run over the dumped
 // attendees array).
@@ -196,11 +220,13 @@ export async function searchAttendees(code, q, limit, offset) {
     const matched = needle ? all.filter((a) => attendeeHaystack(a).includes(needle)) : all;
     const lim = Math.min(Math.max(Number(limit) || 50, 0), 200);
     const off = Math.max(Number(offset) || 0, 0);
+    const items = matched.slice(off, off + lim);
     return {
       total: matched.length,
       offset: off,
       limit: lim,
-      items: matched.slice(off, off + lim),
+      items: items,
+      questions: answeredQuestions(b.eventQuestions, items),
       snapshot: true,
     };
   }
@@ -965,8 +991,10 @@ function closeSheet() {
      checkedIn   top-level BOOLEAN (true = checked in); the checkIn
                  date-time is a separate, non-boolean field
      answers     [{ question: {id}, value: [string, ...] }] — the
-                 question object carries ONLY an id (no text), so the
-                 label is the raw question id
+                 question object carries ONLY an id; the search response's
+                 `questions` map (from /event-questions) supplies the text
+     questions   [{ id, name, type, value: [...] }] — contact custom fields
+                 (e.g. Emergency Contact), labelled inline by name
      due amount  NOT present: the attendee object carries no order or
                  payment data → no due column (no fabricated join)
      activities  NOT embedded on the attendee → no activities block
@@ -993,32 +1021,31 @@ function attendeeTicket(a) {
   return rt.name || rt.code || "";
 }
 
-// Question rows for the detail sheet, best-effort across payload shapes:
-// the live Cvent API returns `questions: [{ name, type, value: [...] }]`
-// (label = the question text); the openapi schema's minimal form is
-// `answers: [{ question: {id}, value: [...] }]` (label = the id); and some
-// payloads only carry `contact.customFields`. First non-empty source wins.
-function attendeeQuestionRows(a) {
+// Detail-sheet rows, as [section title, rows]. Contact custom fields
+// (`questions: [{ name, value }]`, else `contact.customFields`) are
+// labelled inline; registration answers (`answers: [{ question: {id},
+// value }]`) are labelled via qmap (id → {text}), falling back to the raw id.
+// Both are shown — an attendee commonly has both.
+function attendeeDetailSections(a, qmap) {
   const c = (a && a.contact) || {};
   const norm = (v) =>
     Array.isArray(v) ? v : v != null && v !== "" ? [v] : [];
-  const fromQ = (list) =>
-    list
-      .map((q) => ({
-        label: (q && (q.name || (q.question && q.question.id))) || "question",
-        vals: norm(q && (q.value != null ? q.value : q.val)),
-      }))
-      .filter((r) => r.label && r.label !== "question" || r.vals.length);
-  const fromCustom = (list) =>
+  const named = (list) =>
     (Array.isArray(list) ? list : [])
-      .map((f) => ({ label: f && f.name || "field", vals: norm(f && f.value) }))
-      .filter((r) => r.label && r.label !== "field" || r.vals.length);
-
-  let rows = [];
-  if (Array.isArray(a && a.questions) && a.questions.length) rows = fromQ(a.questions);
-  else if (Array.isArray(a && a.answers) && a.answers.length) rows = fromQ(a.answers);
-  else rows = fromCustom(c.customFields);
-  return rows;
+      .map((f) => ({ label: (f && f.name) || "", vals: norm(f && f.value) }))
+      .filter((r) => r.label || r.vals.length);
+  const custom = Array.isArray(a && a.questions) && a.questions.length ? a.questions : c.customFields;
+  const answers = (Array.isArray(a && a.answers) ? a.answers : [])
+    .map((ans) => {
+      const id = (ans && ans.question && ans.question.id) || "";
+      const q = (qmap && id && qmap[id]) || null;
+      return { label: (q && q.text) || id, vals: norm(ans && ans.value) };
+    })
+    .filter((r) => r.label || r.vals.length);
+  return [
+    ["Registration answers", answers],
+    ["Additional information", named(custom)],
+  ].filter(([, rows]) => rows.length);
 }
 
 // Work (or home) address flattened to a single line.
@@ -1031,7 +1058,7 @@ function attendeeAddress(a) {
   return [ad.address1, city, ad.country || ad.countryCode].filter(Boolean).join(", ");
 }
 
-function attendeeSheetHtml(a) {
+function attendeeSheetHtml(a, qmap) {
   const name = attendeeName(a);
   const c = (a && a.contact) || {};
   const conf = a.confirmationNumber || "";
@@ -1078,9 +1105,8 @@ function attendeeSheetHtml(a) {
     }
     inner += "</dl>";
   }
-  const rows = attendeeQuestionRows(a);
-  if (rows.length) {
-    inner += '<div class="sheet-sec">Registration details</div><dl class="kv-list">';
+  for (const [title, rows] of attendeeDetailSections(a, qmap)) {
+    inner += '<div class="sheet-sec">' + esc(title) + '</div><dl class="kv-list">';
     for (const r of rows) {
       inner +=
         "<dt>" + esc(r.label) + "</dt><dd>" +
@@ -1200,7 +1226,7 @@ export function attendees(mount, code) {
   clearTimeout(attDebounce);
   closeSheet(); // route change — drop any open sheet + restore body scroll
   ensureNavWatch(); // restore body scroll on navigation-away (no unmount hook)
-  const state = { q: "", items: [], result: null, loading: false };
+  const state = { q: "", items: [], questions: {}, result: null, loading: false };
 
   // The one search listener, re-attached after every re-render (mount
   // innerHTML replacement drops it). 300 ms debounce per the view spec. The
@@ -1313,6 +1339,7 @@ export function attendees(mount, code) {
     state.loading = false;
     state.result = r;
     state.items = offset === 0 ? r.items : state.items.concat(r.items);
+    state.questions = Object.assign(offset === 0 ? {} : state.questions, r.questions || {});
     if (state.pendingSearch) {
       state.pendingSearch = false;
       load(0); // a search was typed mid-flight — run it now
@@ -1329,7 +1356,7 @@ export function attendees(mount, code) {
     wrap.innerHTML =
       '<div class="sheet-backdrop" data-sheet-close></div>' +
       '<div class="sheet-panel"><span class="sheet-handle" data-sheet-close></span>' +
-      attendeeSheetHtml(a) +
+      attendeeSheetHtml(a, state.questions) +
       "</div>";
     (document.body || document).appendChild(wrap);
     document.body.style.overflow = "hidden"; // body scroll lock (house-style)
@@ -1371,7 +1398,7 @@ export function attendees(mount, code) {
       if (panel) {
         panel.innerHTML =
           '<span class="sheet-handle" data-sheet-close></span>' +
-          attendeeSheetHtml(a);
+          attendeeSheetHtml(a, state.questions);
       }
     }
     checkInAttendee(code, a.id)
@@ -1389,7 +1416,7 @@ export function attendees(mount, code) {
           if (panel) {
             panel.innerHTML =
               '<span class="sheet-handle" data-sheet-close></span>' +
-              attendeeSheetHtml(a);
+              attendeeSheetHtml(a, state.questions);
           }
         }
       });

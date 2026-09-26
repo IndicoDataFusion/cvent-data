@@ -30,6 +30,7 @@ var dumpResources = []struct {
 	{"discounts", "discounts.json"},
 	{"sessions", "sessions.json"},
 	{"speakers", "speakers.json"},
+	{"eventQuestions", "event-questions.json"},
 }
 
 // ResourceFiles returns the dump layout: the bundle-key → on-disk filename
@@ -60,6 +61,8 @@ func resourceField(b *EventBundle, key string) json.RawMessage {
 		return b.Transactions
 	case "transactionItems":
 		return b.TransactionItems
+	case "eventQuestions":
+		return b.EventQuestions
 	case "feeItems":
 		return b.FeeItems
 	case "admissionItems":

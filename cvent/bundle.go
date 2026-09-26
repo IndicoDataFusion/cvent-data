@@ -41,6 +41,9 @@ type EventBundle struct {
 	OrderItems        json.RawMessage `json:"orderItems,omitempty"`
 	Transactions      json.RawMessage `json:"transactions,omitempty"`
 	TransactionItems  json.RawMessage `json:"transactionItems,omitempty"`
+	// EventQuestions resolves attendees[].answers[].question.id to the
+	// question text/type (raw, including Cvent's SL_* system fields).
+	EventQuestions json.RawMessage `json:"eventQuestions,omitempty"`
 
 	// Errors maps resource name → error string for resources that failed to
 	// fetch. Never fatal: the bundle is returned as long as the event
@@ -267,7 +270,7 @@ var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[
 func IsUUID(s string) bool { return uuidRe.MatchString(s) }
 
 // fetchEvent resolves the event (code→uuid via a single-page GET, or uuid
-// directly) and fans out the 12 bundle resources in parallel. Per-resource
+// directly) and fans out the 13 bundle resources in parallel. Per-resource
 // failures are recorded in Errors (resource field left nil); the bundle is
 // returned as long as the event itself resolved.
 func (ec *EventCache) fetchEvent(ctx context.Context, code string) (*EventBundle, error) {
@@ -294,7 +297,7 @@ func (ec *EventCache) fetchEvent(ctx context.Context, code string) (*EventBundle
 		name  string
 		fetch func(ctx context.Context) ([]json.RawMessage, error)
 	}
-	// Exactly the 12 bundle resources, one goroutine each.
+	// Exactly the 13 bundle resources, one goroutine each.
 	specs := []resSpec{
 		{"registrationTypes", func(ctx context.Context) ([]json.RawMessage, error) {
 			return ec.c.listAll(ctx, "/events/"+uuid+"/registration-types", nil)
@@ -333,6 +336,9 @@ func (ec *EventCache) fetchEvent(ctx context.Context, code string) (*EventBundle
 		}},
 		{"transactionItems", func(ctx context.Context) ([]json.RawMessage, error) {
 			return ec.c.listAll(ctx, "/events/"+uuid+"/transactions/items", nil)
+		}},
+		{"eventQuestions", func(ctx context.Context) ([]json.RawMessage, error) {
+			return ec.c.listAll(ctx, "/event-questions", url.Values{"filter": {"event.id eq '" + uuid + "'"}})
 		}},
 	}
 
@@ -373,6 +379,7 @@ func (ec *EventCache) fetchEvent(ctx context.Context, code string) (*EventBundle
 		"orderItems":        func(r json.RawMessage) { b.OrderItems = r },
 		"transactions":      func(r json.RawMessage) { b.Transactions = r },
 		"transactionItems":  func(r json.RawMessage) { b.TransactionItems = r },
+		"eventQuestions":    func(r json.RawMessage) { b.EventQuestions = r },
 	}
 	for i, spec := range specs {
 		if errs[i] != nil {

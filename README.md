@@ -91,8 +91,9 @@ go run ./cmd/cvent-dump TESTCODE01 TESTCODE02  # explicit codes
 ```
 
 `--dump <dir>` fetches each configured event **once** and writes a snapshot —
-`<dir>/index.json` plus one dir per event holding `event.json`, 12 resource
-files (attendees, orders, transactions, sessions, speakers, …) and
+`<dir>/index.json` plus one dir per event holding `event.json`, 13 resource
+files (attendees, orders, transactions, sessions, speakers, event questions,
+…) and
 `meta.json` — then exits (no server). It is one-shot and fatal on missing
 credentials. The server serves that dir at `/data/…`; the frontend reads it
 instead of the live API when the page URL has a `static=1` query param or
@@ -105,7 +106,8 @@ the intended path for HTTPS-deployed or file-only setups.
 An event picker at the left of the top bar, then per-event tabs:
 **Overview** (a dashboard of collapsible Registrations, Pricing, Payments
 and Program sections) and **Attendees** (search, a table, and a detail
-sheet with the full record plus a check-in button that writes back to
+sheet with the full record — registration answers labelled with their
+question text (from `GET /event-questions`) — plus a check-in button that writes back to
 Cvent; hidden in static mode). The footer shows the build SHA.
 
 ### API
@@ -114,9 +116,9 @@ Cvent; hidden in static mode). The footer shows the build SHA.
 |---|---|
 | `GET /api/health` | `{ok, source, build}`; always 200 |
 | `GET /api/cvent/events` | `{events, default}`: the catalog from `data/index.json` (empty if no dump) + the default code (`--event`, else `CVENT_CODE_1`) |
-| `GET /api/cvent/events/{code}` | the 12-resource bundle; 15-min server cache |
+| `GET /api/cvent/events/{code}` | the 13-resource bundle; 15-min server cache |
 | `GET /api/cvent/events/{code}/payments` | attendee→order→transaction join: `totals` (ordered/paid/due/refunded) + `orders` rows + `cancelled` |
-| `GET /api/cvent/events/{code}/attendees?q=&limit=&offset=` | case-insensitive search over name/email/confirmation; `limit` defaults 50, caps at 200 |
+| `GET /api/cvent/events/{code}/attendees?q=&limit=&offset=` | case-insensitive search over name/email/confirmation; `limit` defaults 50, caps at 200. `questions` maps each answered question id → `{text, type}` |
 | `POST /api/cvent/events/{code}/checkin` | body `{"attendeeIds":[…]}`; max 100; **writes to Cvent**. The app has no auth of its own — LAN trust model |
 | `POST /api/cvent/events/{code}/repull` | background re-fetch; returns immediately (non-blocking) |
 | `GET /api/cvent/events/{code}/repull-status` | `{running, pulledAt}` |

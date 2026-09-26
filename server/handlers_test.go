@@ -251,6 +251,48 @@ func TestAttendeesSearchAndPaging(t *testing.T) {
 	}
 }
 
+// TestAttendeesQuestionLabels: the search response carries question id →
+// {text, type} for exactly the questions the returned attendees answered —
+// not the rest of the event's questions, and not unknown ids.
+func TestAttendeesQuestionLabels(t *testing.T) {
+	client := cvent.New("http://127.0.0.1:0", "c", "s")
+	ec := cvent.NewEventCache(client)
+	h := newCventHandlers("TESTCODE01", client, ec)
+	b := &cvent.EventBundle{Code: "TESTCODE01", PulledAt: time.Now().UTC().Format(time.RFC3339)}
+	b.Event = json.RawMessage(`{"id":"` + testCheckinUUID + `"}`)
+	b.Attendees = json.RawMessage(`[
+		{"id":"a1","contact":{"firstName":"Ada"},"answers":[{"question":{"id":"q1"},"value":["yes"]},{"question":{"id":"qx"},"value":["?"]}]},
+		{"id":"a2","contact":{"firstName":"Grace"},"answers":[{"question":{"id":"q2"},"value":["no"]}]}
+	]`)
+	b.EventQuestions = json.RawMessage(`[
+		{"id":"q1","text":"Terms accepted","type":"MultiChoice"},
+		{"id":"q2","text":"First time attending","type":"SingleChoice"},
+		{"id":"q3","text":"SL_DURATION11","type":"OpenEndedTextOneLine"}
+	]`)
+	ec.Put(h.defaultCode, b)
+
+	get := func(url string) map[string]map[string]string {
+		rec := httptest.NewRecorder()
+		h.route(rec, httptest.NewRequest(http.MethodGet, url, nil))
+		var out struct {
+			Questions map[string]map[string]string `json:"questions"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return out.Questions
+	}
+	all := get("/api/cvent/events/TESTCODE01/attendees")
+	if len(all) != 2 || all["q1"]["text"] != "Terms accepted" || all["q2"]["type"] != "SingleChoice" {
+		t.Fatalf("questions = %v, want q1+q2 only", all)
+	}
+	// Scoped to the returned page: only Ada's answers.
+	ada := get("/api/cvent/events/TESTCODE01/attendees?q=ada")
+	if len(ada) != 1 || ada["q1"]["text"] != "Terms accepted" {
+		t.Fatalf("questions for q=ada = %v, want q1 only", ada)
+	}
+}
+
 func TestAttendeeNameJoining(t *testing.T) {
 	cases := []struct {
 		in   json.RawMessage

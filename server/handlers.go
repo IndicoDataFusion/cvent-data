@@ -249,11 +249,56 @@ func (h *cventHandlers) handleAttendees(w http.ResponseWriter, r *http.Request, 
 		items = matched[offset:end]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"total":  len(matched),
-		"offset": offset,
-		"limit":  limit,
-		"items":  items,
+		"total":     len(matched),
+		"offset":    offset,
+		"limit":     limit,
+		"items":     items,
+		"questions": answeredQuestions(b.EventQuestions, items),
 	})
+}
+
+// questionInfo is the label the UI shows for an attendee answer.
+type questionInfo struct {
+	Text string `json:"text"`
+	Type string `json:"type,omitempty"`
+}
+
+// answeredQuestions maps question id → {text, type} for just the questions
+// the given attendees answered (answers[].question.id), so the detail sheet
+// can label answers without downloading the whole question list. Unknown
+// ids are left out (the UI falls back to the raw id).
+func answeredQuestions(eventQuestions json.RawMessage, items []json.RawMessage) map[string]questionInfo {
+	out := map[string]questionInfo{}
+	var qs []struct {
+		ID   string `json:"id"`
+		Text string `json:"text"`
+		Type string `json:"type"`
+	}
+	if len(eventQuestions) == 0 || json.Unmarshal(eventQuestions, &qs) != nil {
+		return out
+	}
+	byID := make(map[string]questionInfo, len(qs))
+	for _, q := range qs {
+		byID[q.ID] = questionInfo{Text: q.Text, Type: q.Type}
+	}
+	for _, raw := range items {
+		var a struct {
+			Answers []struct {
+				Question struct {
+					ID string `json:"id"`
+				} `json:"question"`
+			} `json:"answers"`
+		}
+		if json.Unmarshal(raw, &a) != nil {
+			continue
+		}
+		for _, ans := range a.Answers {
+			if q, ok := byID[ans.Question.ID]; ok {
+				out[ans.Question.ID] = q
+			}
+		}
+	}
+	return out
 }
 
 // attendeeMatches reports whether q (lowercased) occurs in any of the
