@@ -340,9 +340,9 @@ func main() {
 	flag.Parse()
 
 	// Events come from CVENT_CODE_1, CVENT_CODE_2, … (real environment, then
-	// the repo-root .env; run.sh cds to the repo root before exec'ing this
-	// binary). The first is the default selection. An explicitly passed
-	// --event always wins.
+	// the repo-root .env, found by walking up from the working directory).
+	// The first is the default selection. An explicitly passed --event
+	// always wins.
 	codes := []string{eventID}
 	if eventID == "" {
 		if codes = cvent.EventCodes(); len(codes) > 0 {

@@ -465,7 +465,7 @@ def make_handler():
             path = urlparse(self.path).path
             body = self._drain_body()  # keep-alive framing stays clean
             if path == "/oauth2/token":
-                # accept any Basic auth (the test uses test:***
+                # accept any Basic auth (the test uses test:test)
                 self._send({"access_token": "mock-token", "token_type": "bearer",
                             "expires_in": 3600})
                 return

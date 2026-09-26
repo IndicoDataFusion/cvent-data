@@ -12,9 +12,9 @@
 # fixture, and owns both server processes (trap-based cleanup).
 source "$(dirname "$0")/lib.sh"
 
-APP_PORT=8766
+APP_PORT="${APP_PORT:-18766}"   # not 8766, so it never clashes with `make serve`
 MOCK_PORT="${MOCK_PORT:-18990}"   # override if the default is busy
-DEAD_PORT="${DEAD_PORT:-8767}"
+DEAD_PORT="${DEAD_PORT:-18767}"
 DEAD_UPSTREAM="http://127.0.0.1:1"   # nothing listens here -> 502 path
 BASE="http://127.0.0.1:$APP_PORT"
 
@@ -45,7 +45,7 @@ finally:
 PY
 }
 
-port_free "$APP_PORT"  || die "port $APP_PORT is busy — pick a free one (APP_PORT=... not supported here; kill the process and retry)"
+port_free "$APP_PORT"  || die "port $APP_PORT is busy — set APP_PORT=<free port>"
 port_free "$MOCK_PORT" || die "port $MOCK_PORT is busy"
 port_free "$DEAD_PORT" || die "port $DEAD_PORT is busy"
 
@@ -117,8 +117,8 @@ log "starting app on :$APP_PORT (event=syn-event, data=$WORK/fixture, web=web)"
 (
   cd "$REPO_ROOT"
   exec env CVENT_API_BASE="http://127.0.0.1:$MOCK_PORT" \
-    CVENT_CLIENT_ID=test CVENT_CLIENT_SECRET=*** \
-    "$WORK/app" --addr ":$APP_PORT" --event syn-event \
+    CVENT_CLIENT_ID=test CVENT_CLIENT_SECRET=test \
+    "$WORK/app" --addr "127.0.0.1:$APP_PORT" --event syn-event \
     --data "$WORK/fixture" --web web
 ) 2> "$WORK/app.log" &
 APP_PID=$!
@@ -325,8 +325,8 @@ log "starting second app on :$DEAD_PORT with CVENT_API_BASE=$DEAD_UPSTREAM"
 (
   cd "$REPO_ROOT"
   exec env CVENT_API_BASE="$DEAD_UPSTREAM" \
-    CVENT_CLIENT_ID=test CVENT_CLIENT_SECRET=*** \
-    "$WORK/app" --addr ":$DEAD_PORT" --event syn-event \
+    CVENT_CLIENT_ID=test CVENT_CLIENT_SECRET=test \
+    "$WORK/app" --addr "127.0.0.1:$DEAD_PORT" --event syn-event \
     --data "$WORK/fixture" --web web
 ) 2> "$WORK/app_dead.log" &
 DEAD_PID=$!

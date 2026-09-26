@@ -1,6 +1,9 @@
 SHA1 := $(shell git rev-parse --short=7 HEAD)
 OUT := $(shell realpath ./data-server)
 DATA := data
+# Listen address. Loopback by default: the app has no auth. For a phone on
+# the LAN, opt in with: make serve ADDR=0.0.0.0:8766
+ADDR ?= 127.0.0.1:8766
 
 build:
 	cd server && go build -ldflags "-X main.buildSHA=$(SHA1)" -o $(OUT)
@@ -15,7 +18,7 @@ dump: build
 	$(OUT) --dump $(DATA)
 
 serve: build $(DATA)/index.json
-	$(OUT) --addr 127.0.0.1:8766 --web web --data $(DATA)
+	$(OUT) --addr $(ADDR) --web web --data $(DATA)
 
 .PHONY: build dump serve openapi
 

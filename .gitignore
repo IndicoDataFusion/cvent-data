@@ -6,7 +6,6 @@ __pycache__/
 data/
 *.json.bak
 # build artifacts
-/cvent-data-server
 server/server
 /data-server
 # live pulls (tests/pull_event.sh) and the Cvent-owned OpenAPI spec

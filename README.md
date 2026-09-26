@@ -20,7 +20,7 @@ a PWA for browsing event data. Go module `github.com/IndicoDataFusion/cvent-data
 
 ```bash
 set -a; . ./.env; set +a
-TOKEN=*** -s -X POST "https://api-platform.cvent.com/ea/oauth2/token" \
+TOKEN=$(curl -s -X POST "https://api-platform.cvent.com/ea/oauth2/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -H "Authorization: Basic $(printf '%s' "$CVENT_CLIENT_ID:$CVENT_CLIENT_SECRET" | base64 | tr -d '\n')" \
   -d "grant_type=client_credentials&client_id=$CVENT_CLIENT_ID" | python3 -c 'import json,sys;print(json.load(sys.stdin)["access_token"])')
@@ -43,44 +43,27 @@ picker lists the events in the dump catalog (`data/index.json`); the
 ```bash
 make serve    # build ./data-server, dump data/ if missing, serve on 127.0.0.1:8766
 make dump     # re-pull every configured event's snapshot into data/
+make serve ADDR=0.0.0.0:8766   # also reachable from other devices on the LAN
 ```
 
-Serves the app at **http://localhost:8766**. `make serve` rebuilds
-`./data-server` (`-X main.buildSHA=<short sha>`) and, when
-`data/index.json` is absent, runs a one-time dump first — the event list
-(`GET /api/cvent/events`) is read from that file, so without it the UI shows
-no events. `bash run.sh` is the older LAN variant: it builds
-`cvent-data-server` if missing and listens on `${ADDR:-:8766}` (all
-interfaces), but does not dump.
+Open **http://localhost:8766**. `make serve` rebuilds `./data-server` and,
+when `data/index.json` is absent, runs a one-time dump first — the event
+list is read from that file.
 
-Events are listed as **`CVENT_CODE_1`**, **`CVENT_CODE_2`**, … in the
-repo-root `.env` (the real environment wins per key). Dumps pull all of
-them; the first is the default selection (the `--event` flag always wins).
-With none set, a legacy `CVENT_EVENT` is used; with nothing configured a
-dump exits with an error and the picker defaults to the first catalog
-event. To add an event, add the next `CVENT_CODE_<n>`
-and run `make dump`; the picker lists it on the next page load (restart the
-server only to change the default). The picker shows each event's optional
-`shortName` from `data/index.json`, else its full title — set it by hand in
-that file; re-dumps preserve it. Credentials — `CVENT_CLIENT_ID` /
-`CVENT_CLIENT_SECRET` — live in the gitignored `.env`. `CVENT_API_BASE` is
-optional (default `https://api-platform.cvent.com/ea`; the EU base is
-`https://api-platform-eur.cvent.com/ea`).
+> **The app has no authentication.** Anyone who can reach the port can read
+> attendee and payment data and check attendees in (a write to Cvent). Keep
+> the default loopback address unless you trust the network.
 
-With **missing credentials** the server still starts: static serving and
-`/api/health` keep working, but `/api/cvent/…` answers
-`503 {"error":"cvent credentials not configured"}` (the `cvent` source is
-always registered; without a client its handler group reports missing
-credentials).
+Events are listed as **`CVENT_CODE_1`**, **`CVENT_CODE_2`**, … in `.env`
+(the real environment wins per key). Dumps pull all of them; the first is
+the default selection (`--event` overrides it). To add an event, add the
+next `CVENT_CODE_<n>` and run `make dump`. The picker shows each event's
+optional `shortName` from `data/index.json`, else its title — set it by hand
+in that file; re-dumps preserve it. `CVENT_API_BASE` is optional (default
+`https://api-platform.cvent.com/ea`; EU: `https://api-platform-eur.cvent.com/ea`).
 
-### Phone install
-
-The app is a PWA (manifest + service worker; add-to-home-screen works), but
-this host serves plain HTTP on the LAN. Browsers require HTTPS (or
-localhost) to register a service worker, so on a LAN phone the SW will not
-register and offline mode is unavailable — the app still works fully online
-from the phone. Serve it behind HTTPS (or use
-static mode below) for the full PWA experience.
+Without credentials the server still starts: static files and `/api/health`
+work, and `/api/cvent/…` answers `503`.
 
 ### Offline / static mode
 
@@ -120,7 +103,7 @@ Cvent; hidden in static mode). The footer shows the build SHA.
 | `GET /api/cvent/events/{code}` | the 13-resource bundle; 15-min server cache |
 | `GET /api/cvent/events/{code}/payments` | attendee→order→transaction join: `totals` (ordered/paid/due/refunded) + `orders` rows + `cancelled` |
 | `GET /api/cvent/events/{code}/attendees?q=&limit=&offset=` | case-insensitive search over name/email/confirmation; `limit` defaults 50, caps at 200. `questions` maps each answered question id → `{text, type}` |
-| `POST /api/cvent/events/{code}/checkin` | body `{"attendeeIds":[…]}`; max 100; **writes to Cvent**. The app has no auth of its own — LAN trust model |
+| `POST /api/cvent/events/{code}/checkin` | body `{"attendeeIds":[…]}`; max 100; **writes to Cvent**; no auth — see Run |
 | `POST /api/cvent/events/{code}/repull` | background re-fetch; returns immediately (non-blocking) |
 | `GET /api/cvent/events/{code}/repull-status` | `{running, pulledAt}` |
 

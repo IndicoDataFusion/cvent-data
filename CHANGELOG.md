@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Remove `run.sh`. It skipped rebuilds once a binary existed and listened on
+  all interfaces by default. `make serve ADDR=0.0.0.0:8766` replaces its LAN
+  use; the default stays loopback-only.
+- README: fix the broken Quick auth snippet, add a no-authentication
+  warning, drop the Phone install section.
+- `.env.example`: leave `CVENT_CLIENT_SECRET` empty (it held a literal `***`).
+- `tests/test_server.sh`: default to ports 18766/18767 (overridable via
+  `APP_PORT` / `DEAD_PORT`) and bind loopback, so it runs alongside
+  `make serve`.
+
 ## v0.1.0 — 2026-09-26
 
 First public release.
