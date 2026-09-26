@@ -2,7 +2,7 @@
 # probe_endpoints.sh — live-probe a list of in-scope endpoints, print status + shape
 source "$(dirname "$0")/lib.sh"
 require_env
-EV="${1:-4f1c2a9e-7b3d-4e8a-9c21-5d6e7f80a1b0}"   # default: CONF27
+EV="${1:?usage: probe_endpoints.sh <event-uuid>}"
 
 probe() {
   local label="$1" path="$2"; shift 2
@@ -46,7 +46,7 @@ probe "GET /custom-fields (Contact)" "/custom-fields" -G --data-urlencode "filte
 CID=$(cvent_get /contacts 'limit=1' | python3 -c 'import json,sys;print(json.load(sys.stdin)["data"][0]["id"])')
 probe "GET /contacts/{id}/history" "/contacts/$CID/history"
 
-echo "=== per-event endpoints (CONF27) ==="
+echo "=== per-event endpoints ($EV) ==="
 probe "GET /events/{id}/discounts" "/events/$EV/discounts"
 probe "GET /events/{id}/emails" "/events/$EV/emails"
 probe "GET /events/{id}/registration-paths" "/events/$EV/registration-paths"

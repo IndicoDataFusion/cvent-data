@@ -2,8 +2,8 @@
 # pull_event.sh — pull one event's full data into a local folder.
 #
 # Usage: tests/pull_event.sh <code-or-uuid> [dest-dir]
-#   <code-or-uuid>  short event code (TESTCODE01) or UUID (4f1c2a9e-…)
-#   [dest-dir]      output directory (default: tests/conf27)
+#   <code-or-uuid>  short event code (e.g. ABC123XYZ) or UUID
+#   [dest-dir]      output directory (default: tests/pulls/<code-or-uuid>, gitignored)
 #
 # Writes:
 #   <dest>/event.json             full event object
@@ -49,7 +49,7 @@ print(d["data"][0]["id"])
 fi
 [ -n "$event_id" ]; check $? "event id = $event_id"
 
-dest="${2:-$(dirname "$0")/conf27}"
+dest="${2:-$(dirname "$0")/pulls/$ref}"
 mkdir -p "$dest/_pages"
 pages="$dest/_pages"
 log "output dir: $dest"

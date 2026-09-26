@@ -11,6 +11,9 @@ import (
 	"testing"
 )
 
+// testDefaultCode stands in for the --event default the server would get.
+const testDefaultCode = "TESTCODE01"
+
 // newStaticTestServer wires a test server with the same mux layout main()
 // uses, pointed at temp web/data dirs.
 func newStaticTestServer(t *testing.T, webDir, dataDir string) (*server, *httptest.Server) {
@@ -41,7 +44,7 @@ func TestCventMissingCreds(t *testing.T) {
 		[]byte("<html>INDEX</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s := &server{webDir: webDir, dataDir: dataDir, eventID: defaultEventID}
+	s := &server{webDir: webDir, dataDir: dataDir, eventID: testDefaultCode}
 	srv := httptest.NewServer(buildRouter(s))
 	defer srv.Close()
 
@@ -104,8 +107,8 @@ func TestCventMissingCreds(t *testing.T) {
 	if len(cat.Events) != 0 {
 		t.Errorf("catalog events = %d, want 0 (no index.json)", len(cat.Events))
 	}
-	if cat.Default != defaultEventID {
-		t.Errorf("catalog default = %q, want %q", cat.Default, defaultEventID)
+	if cat.Default != testDefaultCode {
+		t.Errorf("catalog default = %q, want %q", cat.Default, testDefaultCode)
 	}
 
 	// An unknown source is STILL 404 "unknown source" — the fix must not turn

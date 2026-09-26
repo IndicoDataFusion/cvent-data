@@ -7,9 +7,9 @@ a PWA for browsing event data. Go module `github.com/zhangt58/cvent`.
   bundle cache, payments join, snapshot dumps.
 - `cmd/cvent-dump/` — standalone CLI that writes event snapshots.
 - `server/` + `web/` — the Cvent Data PWA (see below).
-- `openapi.json` — full official OpenAPI 3.0.2 spec (367 endpoints), pulled
-  from the Cvent developer portal. Use it as the source of truth for
-  endpoints, schemas, and scopes.
+- `openapi.json` (gitignored; fetch with `make openapi`) — the official
+  OpenAPI 3.0.2 spec (367 endpoints) from the Cvent developer portal. Use it
+  as the source of truth for endpoints, schemas, and scopes.
 - `tests/` — bash smoke tests against the live API (see `tests/README.md`).
 - `scripts/make_icons.py` — regenerates the PWA icons in `web/icons/`.
 - `.env` (gitignored; template in `.env.example`) — `CVENT_CLIENT_ID` /
@@ -53,11 +53,11 @@ no events. `bash run.sh` is the older LAN variant: it builds
 interfaces), but does not dump.
 
 Events are listed as **`CVENT_CODE_1`**, **`CVENT_CODE_2`**, … in the
-repo-root `.env` (the real environment wins per key): currently
-`TESTCODE01` = CONF27 Attendees and `TESTCODE02` = CONF27 Sponsors.
-Dumps pull all of them; the first is the default selection (the `--event`
-flag always wins). With none set, a legacy `CVENT_EVENT` is used, then the
-build default `TESTCODE01`. To add an event, add the next `CVENT_CODE_<n>`
+repo-root `.env` (the real environment wins per key). Dumps pull all of
+them; the first is the default selection (the `--event` flag always wins).
+With none set, a legacy `CVENT_EVENT` is used; with nothing configured a
+dump exits with an error and the picker defaults to the first catalog
+event. To add an event, add the next `CVENT_CODE_<n>`
 and run `make dump`; the picker lists it on the next page load (restart the
 server only to change the default). The picker shows each event's optional
 `shortName` from `data/index.json`, else its full title — set it by hand in
@@ -78,16 +78,16 @@ The app is a PWA (manifest + service worker; add-to-home-screen works), but
 this host serves plain HTTP on the LAN. Browsers require HTTPS (or
 localhost) to register a service worker, so on a LAN phone the SW will not
 register and offline mode is unavailable — the app still works fully online
-from the phone. Same caveat as the other local PWAs (eatatstate, IDF,
-house-style).
+from the phone. Serve it behind HTTPS (or use
+static mode below) for the full PWA experience.
 
 ### Offline / static mode
 
 ```bash
 ./data-server --dump data                        # every CVENT_CODE_<n>; or: make dump
-./data-server --event TESTCODE01 --dump data    # just one event
+./data-server --event <CODE> --dump data        # just one event
 go run ./cmd/cvent-dump --dir data               # standalone CLI, same layout
-go run ./cmd/cvent-dump TESTCODE01 TESTCODE02  # explicit codes
+go run ./cmd/cvent-dump <CODE1> <CODE2>          # explicit codes
 ```
 
 `--dump <dir>` fetches each configured event **once** and writes a snapshot —

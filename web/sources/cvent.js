@@ -748,8 +748,8 @@ function programCard(bundle) {
 }
 
 function dashboardHtml(bundle, payments) {
-  // Currency: the fee items' code first, then the event's (both "USD" for
-  // CONF27); absent → money() renders a bare number.
+  // Currency: the fee items' code first, then the event's (typically the
+  // same); absent → money() renders a bare number.
   const fee = Array.isArray(bundle.feeItems) ? bundle.feeItems : [];
   const currency =
     (fee[0] && fee[0].currency) || (bundle.event && bundle.event.currency) || "";
@@ -982,8 +982,7 @@ function closeSheet() {
    badge (sheet header), the hidden check-in button, and the static-mode
    file search inside searchAttendees.
 
-   Attendee field ground truth (openapi.json "attendee" schema; CONF27's
-   pulled sample is empty, so the schema wins):
+   Attendee field ground truth (openapi.json "attendee" schema):
      name        contact.{firstName,middleName,lastName} — no top-level name
      email       contact.email — no top-level email
      ticket      registrationType is a Lookup {id, code, name} → .name

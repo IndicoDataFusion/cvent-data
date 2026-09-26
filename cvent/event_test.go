@@ -12,8 +12,7 @@ import (
 	"time"
 )
 
-// The test event: CONF27. The live event may have no attendees, but that is
-// irrelevant here — every test runs against an httptest upstream only.
+// The test event is synthetic: every test runs against an httptest upstream only.
 const testUUID = "4f1c2a9e-7b3d-4e8a-9c21-5d6e7f80a1b0"
 const testCode = "TESTCODE01"
 
@@ -114,13 +113,13 @@ func (m *cventMock) setSingle(path string, body []byte) {
 // eventListBody is a /events list page (the code-lookup shape): items under
 // "items" plus paging, first item being the target event.
 func eventListBody(uuid, code string) []byte {
-	return []byte(`{"items":[` + `{"id":"` + uuid + `","code":"` + code + `","name":"CONF 27"}` +
+	return []byte(`{"items":[` + `{"id":"` + uuid + `","code":"` + code + `","name":"Test Event"}` +
 		`],"paging":{"limit":200,"totalCount":1,"currentToken":"t1"}}`)
 }
 
 // eventObjectBody is the /events/{uuid} single-object shape (not a list).
 func eventObjectBody(uuid, code string) []byte {
-	return []byte(`{"id":"` + uuid + `","code":"` + code + `","name":"CONF 27"}`)
+	return []byte(`{"id":"` + uuid + `","code":"` + code + `","name":"Test Event"}`)
 }
 
 // setEventEndpoints points both lookup paths at the target event.

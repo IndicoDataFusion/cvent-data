@@ -17,4 +17,10 @@ dump: build
 serve: build $(DATA)/index.json
 	$(OUT) --addr 127.0.0.1:8766 --web web --data $(DATA)
 
-.PHONY: build dump serve
+.PHONY: build dump serve openapi
+
+# Fetch the official Cvent OpenAPI spec (unauthenticated; gitignored).
+openapi:
+	curl -sf -X POST https://developers.cvent.com/api/graphql \
+	  -H 'Content-Type: application/json' -d '{"query":"{ getPublicSpec }"}' \
+	  | python3 -c 'import json,sys;s=json.load(sys.stdin)["data"]["getPublicSpec"];s=json.loads(s) if isinstance(s,str) else s;json.dump(s,open("openapi.json","w"),indent=2)'

@@ -19,8 +19,6 @@ import (
 // Empty for ad-hoc local builds.
 var buildSHA = ""
 
-const defaultEventID = "TESTCODE01"
-
 type server struct {
 	webDir  string // directory containing web assets
 	dataDir string // directory with the --dump snapshots, served under /data/
@@ -347,16 +345,19 @@ func main() {
 	// --event always wins.
 	codes := []string{eventID}
 	if eventID == "" {
-		if codes = cvent.EventCodes(); len(codes) == 0 {
-			codes = []string{defaultEventID}
+		if codes = cvent.EventCodes(); len(codes) > 0 {
+			eventID = codes[0]
 		}
-		eventID = codes[0]
 	}
 
 	// --dump is one-shot: fetch each configured event's bundle once, write
 	// the snapshots, and exit. Missing credentials are fatal here (no
 	// server-start fallback).
 	if dumpDir != "" {
+		if len(codes) == 0 {
+			fmt.Fprintln(os.Stderr, "dump: no events configured: set CVENT_CODE_1 (…) in .env or pass --event")
+			os.Exit(1)
+		}
 		creds, err := cvent.FromEnvironment()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "dump: %v\n", err)

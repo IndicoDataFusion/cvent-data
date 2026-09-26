@@ -14,8 +14,7 @@ import (
 // (line ~36869) resolves its name via contact -> AttendeeContactInfo ->
 // AttendeeContact, which carries FLAT firstName/middleName/lastName strings;
 // the nested `Name` schema (givenName/familyName/middleName) is only used by
-// User. tests/conf27/attendees.json is EMPTY for CONF27 (totalCount 0), so no
-// live sample disambiguates the two. testAttendeeName below therefore accepts
+// User. No live sample disambiguates the two. testAttendeeName below therefore accepts
 // both shapes (nested first, flat as fallback). BuildPayments itself never
 // parses attendees — it only receives an attendeeName callback.
 var testAttendees = map[string]string{

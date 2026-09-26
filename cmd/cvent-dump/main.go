@@ -8,8 +8,7 @@
 //	cvent-dump [flags] [event-code-or-uuid ...]
 //
 // Event codes/uuids may be given as positional arguments; otherwise every
-// CVENT_CODE_<n> from the environment / .env is dumped. If none is set, the
-// build default is used.
+// CVENT_CODE_<n> from the environment / .env is dumped.
 package main
 
 import (
@@ -20,8 +19,6 @@ import (
 
 	"github.com/zhangt58/cvent/cvent"
 )
-
-const defaultEventID = "TESTCODE01"
 
 func main() {
 	var (
@@ -82,7 +79,7 @@ func main() {
 		events = cvent.EventCodes()
 	}
 	if len(events) == 0 {
-		events = []string{defaultEventID}
+		fail("no events: pass event codes/uuids or set CVENT_CODE_1 (…) in .env")
 	}
 
 	for _, event := range events {

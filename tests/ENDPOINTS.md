@@ -1,6 +1,6 @@
 # Cvent REST API — endpoint map (verified 2026-09-21)
 
-Full spec: `../openapi.json` (367 paths, 1332 schemas). **App scopes grew from
+Full spec: `../openapi.json` (`make openapi`) (367 paths, 1332 schemas). **App scopes grew from
 16 → 41** (admin added orders/transactions, sessions, speakers, players,
 admission/fee/donation items, webcasts, videos, meeting-requests,
 invitation-lists, weblinks, process-forms, session-enrollment/attendance, …).
@@ -8,9 +8,9 @@ That takes reachable operations from **37 → 94**.
 
 Run:
 - `tests/print_scopes.sh` — re-dump the live scope set
-- `tests/probe_endpoints.sh [event-uuid]` — re-verify the read endpoints live
+- `tests/probe_endpoints.sh <event-uuid>` — re-verify the read endpoints live
 - `tests/pull_event.sh <code-or-uuid> [dest]` — pull a whole event
-(defaults to CONF27 `4f1c2a9e-7b3d-4e8a-9c21-5d6e7f80a1b0`).
+(default dest `tests/pulls/<code-or-uuid>`, gitignored).
 
 ## Payment status (NEW — `event/orders:read` + `event/transactions:read`)
 
@@ -24,14 +24,14 @@ Run:
 | `GET /transactions`, `/transactions/{id}/items` | same, account-wide |
 
 Model: attendee → order(s) → order items; attendee → transactions. `amountDue > 0`
-= unpaid balance. All returned 200 on CONF27 (0 rows — no live registrations).
+= unpaid balance. All returned 200 on the probe event.
 
 ## Pricing structure (NEW — `event/fee-items:read` + `event/admission-items:read`)
 
 | Endpoint | Notes |
 |---|---|
-| `GET /events/{id}/fee-items` | fee items per admission item (name, amount, currency, product ref). CONF27: 19 |
-| `POST /admission-items/filter` | admission/badge types; `{"filter":"event.id eq '<uuid>'"}`. CONF27: 6 |
+| `GET /events/{id}/fee-items` | fee items per admission item (name, amount, currency, product ref). |
+| `POST /admission-items/filter` | admission/badge types; `{"filter":"event.id eq '<uuid>'"}`. |
 | `GET /events/{id}/donation-items` | donation items |
 
 Note: fee-items is **event-scoped** (`/events/{id}/fee-items`); admission-items is
@@ -41,49 +41,49 @@ top-level + filter (`POST /admission-items/filter`).
 
 | Endpoint | Notes |
 |---|---|
-| `GET /sessions` (top-level) | all sessions; account total N |
+| `GET /sessions` (top-level) | all sessions, account-wide |
 | `POST /sessions/filter` | `{"filter":"event.id eq '<uuid>'"}` |
 | `GET /sessions/enrollment`, `POST /sessions/enrollment/filter` | who enrolled where |
 | `GET /sessions/attendance` | session attendance |
 | `GET /sessions/{id}` + `/speakers`, `/docs` | per-session detail |
-| `GET /speakers` (top-level) | N; `POST /speakers/filter` per-event |
+| `GET /speakers` (top-level) | account-wide; `POST /speakers/filter` per-event |
 | `GET /speaker-categories`, `/session-categories`, `/session-segments` | taxonomy |
 | `GET /program-items/speakers` | program ↔ speaker mapping |
-| `GET /webcasts/players` | 108 (this is what `event/players:read` hits) |
+| `GET /webcasts/players` | (this is what `event/players:read` hits) |
 | `GET /events/{id}/invitation-lists` | invitation lists (per event) |
 | `GET /events/{id}/meeting-requests` | meeting-request config |
 | `GET /events/{id}/event-travel/air-requests`, `.../hotel-requests` | travel requests |
 
 ## Account-scale reads (top-level lists)
 
-| Endpoint || What it is |
+| Endpoint | What it is |
 |---|---|
-| `GET /events` || all events (filter: `filter=code eq '<code>'`) |
-| `POST /events/filter` || filterable list (body `{"filter":"status eq 'Active'"}`) |
-| `GET /contacts` || all contacts (filterable via `POST /contacts/filter`) |
-| `GET /attendees` || all attendee (event×contact) rows |
-| `POST /attendees/filter` || `{"filter":"event.id eq '<uuid>'"}` |
-| `GET /attendees/activities` || engagement log; `?filter=event.id eq '<uuid>'` |
-| `GET /event-questions` || every registration/survey question across events |
-| `GET /attendance-durations` || on-site dwell times per attendee |
-| `GET /contact-types` || contact classification labels |
-| `GET /contact-groups` || mailing/group lists (type, distributionListInfo) |
-| `GET /custom-fields?filter=category eq 'Event'` || event-level custom field defs |
-| `GET /custom-fields?filter=category eq 'Contact'` || contact-level custom field defs |
-| `GET /webcasts/attendee-links` || (empty in testing) |
-| `GET /attendees/activities/external/metadata` || (empty) |
-| `GET /contacts/{id}/history` || contact change history (empty sample) |
+| `GET /events` | all events (filter: `filter=code eq '<code>'`) |
+| `POST /events/filter` | filterable list (body `{"filter":"status eq 'Active'"}`) |
+| `GET /contacts` | all contacts (filterable via `POST /contacts/filter`) |
+| `GET /attendees` | all attendee (event×contact) rows |
+| `POST /attendees/filter` | `{"filter":"event.id eq '<uuid>'"}` |
+| `GET /attendees/activities` | engagement log; `?filter=event.id eq '<uuid>'` |
+| `GET /event-questions` | every registration/survey question across events |
+| `GET /attendance-durations` | on-site dwell times per attendee |
+| `GET /contact-types` | contact classification labels |
+| `GET /contact-groups` | mailing/group lists (type, distributionListInfo) |
+| `GET /custom-fields?filter=category eq 'Event'` | event-level custom field defs |
+| `GET /custom-fields?filter=category eq 'Contact'` | contact-level custom field defs |
+| `GET /webcasts/attendee-links` | (empty in testing) |
+| `GET /attendees/activities/external/metadata` | (empty) |
+| `GET /contacts/{id}/history` | contact change history (empty sample) |
 
-## Per-event reads (CONF27 `4f1c2a9e-…`)
+## Per-event reads
 
-| Endpoint || What it is |
+| Endpoint | What it is |
 |---|---|
-| `GET /events/{id}` || full event object |
-| `GET /events/{id}/registration-types` || ticket types (code, capacity, openForRegistration) |
-| `GET /events/{id}/registration-paths` || registration flows |
-| `GET /events/{id}/emails` || email campaigns (htmlBody, clickTrackingEnabled) |
-| `GET /events/{id}/discounts` || discount codes |
-| `GET /events/{id}/discounts/agenda-items` || per-session discounts (none) |
+| `GET /events/{id}` | full event object |
+| `GET /events/{id}/registration-types` | ticket types (code, capacity, openForRegistration) |
+| `GET /events/{id}/registration-paths` | registration flows |
+| `GET /events/{id}/emails` | email campaigns (htmlBody, clickTrackingEnabled) |
+| `GET /events/{id}/discounts` | discount codes |
+| `GET /events/{id}/discounts/agenda-items` | per-session discounts (none) |
 
 ## Writes (only one scope)
 

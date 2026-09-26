@@ -9,3 +9,7 @@ data/
 /cvent-data-server
 server/server
 /data-server
+# live pulls (tests/pull_event.sh) and the Cvent-owned OpenAPI spec
+tests/pulls/
+tests/conf27/
+/openapi.json

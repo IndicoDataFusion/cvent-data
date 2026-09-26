@@ -11,7 +11,7 @@ tests/test_auth.sh        # OAuth2 token flow + JWT scope dump
 tests/test_events.sh      # /events listing + cursor pagination
 tests/test_contacts.sh    # /contacts listing + limit
 tests/test_attendees.sh   # /attendees + /attendees/filter + activities
-tests/probe_endpoints.sh  # live-probe all in-scope read endpoints
+tests/probe_endpoints.sh <event-uuid>  # live-probe all in-scope read endpoints
 tests/pull_event.sh <code-or-uuid> [dest]   # full pull of one event
 ```
 
@@ -30,21 +30,20 @@ Requires `.env` in the repo root with `CVENT_CLIENT_ID` / `CVENT_CLIENT_SECRET`
 - **Pagination**: `paging: {limit, totalCount, currentToken, _links}` —
   pass `token=<currentToken>` as query param; absent `currentToken` = last page.
   `limit` query param works on list endpoints.
-- **OpenAPI spec**: full 3.0.2 spec (367 paths) saved at `../openapi.json`.
+- **OpenAPI spec**: full 3.0.2 spec (367 paths); `make openapi` saves it to
+  `../openapi.json` (gitignored — it is Cvent's document).
   Fetched via `POST https://developers.cvent.com/api/graphql`
   body `{"query":"{ getPublicSpec }"}` (unauthenticated).
 
 ### Endpoint corrections found by probing
 
 - Attendees are **top-level**: `GET /attendees` (not `/events/{id}/attendees`,
-  which 404s). Account-wide total was N.
+  which 404s) and account-wide — expect millions of rows on a large account.
 - Per-event filtering: `POST /attendees/filter` with JSON body
   `{"filter":"event.id eq '<event-uuid>'"}`. Filter syntax is OData-ish;
   `event_id` (flat) is rejected — dotted field names are required.
 - Activities: `GET /attendees/activities?filter=event.id eq '<uuid>'`
   (filter as **query param** here, not body).
-- Working data volumes in testing: N events / N contacts /
-  N attendees.
 
 ### App scopes (from JWT `scp` claim)
 
