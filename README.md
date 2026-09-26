@@ -103,7 +103,6 @@ Cvent; hidden in static mode). The footer shows the build SHA.
 | `GET /api/cvent/events/{code}` | the 13-resource bundle; 15-min server cache |
 | `GET /api/cvent/events/{code}/payments` | attendee→order→transaction join: `totals` (ordered/paid/due/refunded) + `orders` rows + `cancelled` |
 | `GET /api/cvent/events/{code}/attendees?q=&limit=&offset=` | case-insensitive search over name/email/confirmation; `limit` defaults 50, caps at 200. `questions` maps each answered question id → `{text, type}` |
-| `POST /api/cvent/events/{code}/checkin` | body `{"attendeeIds":[…]}`; max 100; **writes to Cvent**; no auth — see Run |
 | `POST /api/cvent/events/{code}/repull` | background re-fetch; returns immediately (non-blocking) |
 | `GET /api/cvent/events/{code}/repull-status` | `{running, pulledAt}` |
 
