@@ -152,3 +152,8 @@ other file touched. You inherit for free: the shell (top bar, themes,
 offline banner), the `sw.js` caching patterns (just extend the route list),
 dump/static mode (point `staticDataPath` at the source's dump layout), and
 the icons/manifest.
+
+## License
+
+MIT — see `LICENSE`. The bundled Manrope and Space Grotesk fonts in
+`web/fonts/` are under the SIL Open Font License 1.1 (`web/fonts/OFL-*.txt`).

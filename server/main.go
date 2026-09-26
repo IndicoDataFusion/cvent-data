@@ -165,7 +165,7 @@ func (s *server) serveIndex(w http.ResponseWriter) {
 	if s.assets != nil {
 		b = []byte(s.assets.rewrite("", string(b)))
 	}
-	// Footer build stamp (house-style style): the ldflags-injected git SHA,
+	// Footer build stamp (house style): the ldflags-injected git SHA,
 	// or "local" for ad-hoc builds without -ldflags.
 	sha := buildSHA
 	if sha == "" {
