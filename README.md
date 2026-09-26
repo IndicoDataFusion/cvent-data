@@ -11,6 +11,7 @@ a PWA for browsing event data. Go module `github.com/IndicoDataFusion/cvent-data
   OpenAPI 3.0.2 spec (367 endpoints) from the Cvent developer portal. Use it
   as the source of truth for endpoints, schemas, and scopes.
 - `tests/` — bash smoke tests against the live API (see `tests/README.md`).
+- `CHANGELOG.md` — release notes.
 - `scripts/make_icons.py` — regenerates the PWA icons in `web/icons/`.
 - `.env` (gitignored; template in `.env.example`) — `CVENT_CLIENT_ID` /
   `CVENT_CLIENT_SECRET` and the event list `CVENT_CODE_1`, `CVENT_CODE_2`, ….
