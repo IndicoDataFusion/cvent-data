@@ -269,27 +269,40 @@ var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[
 // IsUUID reports whether s looks like a UUID (8-4-4-4-12 hex).
 func IsUUID(s string) bool { return uuidRe.MatchString(s) }
 
+// resolvedEvent is the identity of an event looked up by code or uuid.
+type resolvedEvent struct {
+	ID   string `json:"id"`
+	Code string `json:"code"`
+}
+
+// resolveEvent looks the event up by uuid (GET /events/{uuid}) or by short
+// code (a single-page /events filter) and returns the raw event object.
+func (c *Client) resolveEvent(ctx context.Context, code string) (json.RawMessage, resolvedEvent, error) {
+	var ev resolvedEvent
+	var eventRaw json.RawMessage
+	var err error
+	if IsUUID(code) {
+		eventRaw, err = c.getOnePage(ctx, "/events/"+code, nil)
+	} else {
+		eventRaw, err = c.getOnePage(ctx, "/events", url.Values{"filter": {"code eq '" + code + "'"}})
+	}
+	if err != nil {
+		return nil, ev, fmt.Errorf("event not found: %s: %v", code, err)
+	}
+	if err := json.Unmarshal(eventRaw, &ev); err != nil || ev.ID == "" {
+		return nil, ev, fmt.Errorf("event not found: %s: resolved event has no id", code)
+	}
+	return eventRaw, ev, nil
+}
+
 // fetchEvent resolves the event (code→uuid via a single-page GET, or uuid
 // directly) and fans out the 13 bundle resources in parallel. Per-resource
 // failures are recorded in Errors (resource field left nil); the bundle is
 // returned as long as the event itself resolved.
 func (ec *EventCache) fetchEvent(ctx context.Context, code string) (*EventBundle, error) {
-	var eventRaw json.RawMessage
-	var err error
-	if IsUUID(code) {
-		eventRaw, err = ec.c.getOnePage(ctx, "/events/"+code, nil)
-	} else {
-		eventRaw, err = ec.c.getOnePage(ctx, "/events", url.Values{"filter": {"code eq '" + code + "'"}})
-	}
+	eventRaw, ev, err := ec.c.resolveEvent(ctx, code)
 	if err != nil {
-		return nil, fmt.Errorf("event not found: %s: %v", code, err)
-	}
-	var ev struct {
-		ID   string `json:"id"`
-		Code string `json:"code"`
-	}
-	if err := json.Unmarshal(eventRaw, &ev); err != nil || ev.ID == "" {
-		return nil, fmt.Errorf("event not found: %s: resolved event has no id", code)
+		return nil, err
 	}
 	uuid := ev.ID
 
