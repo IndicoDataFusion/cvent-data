@@ -123,18 +123,19 @@ files (attendees, orders, transactions, sessions, speakers, event questions,
 `meta.json` — then exits (no server). It is one-shot and fatal on missing
 credentials. The server serves that dir at `/data/…`; the frontend reads it
 instead of the live API when the page URL has a `static=1` query param or
-the host is `*.github.io` (a **Snapshot** badge appears and Re-pull /
-check-in are hidden). Static mode is
+the host is `*.github.io` (a **Snapshot** badge appears and Re-pull is
+hidden). Static mode is
 the intended path for HTTPS-deployed or file-only setups.
 
 ### Web app
 
 An event picker at the left of the top bar, then per-event tabs:
-**Overview** (a dashboard of collapsible Registrations, Pricing, Payments
-and Program sections) and **Attendees** (search, a table, and a detail
+**Overview** (a dashboard of collapsible Registrations, Pricing, Discounts,
+Payments and Program sections; Discounts shows each code's used / total and
+links each redemption to its attendee) and **Attendees** (search, a table, and a detail
 sheet with the full record — registration answers labelled with their
-question text (from `GET /event-questions`) — plus a check-in button that writes back to
-Cvent; hidden in static mode). The footer shows the build SHA.
+question text (from `GET /event-questions`) and a read-only check-in
+status). The footer shows the build SHA.
 
 ### API
 

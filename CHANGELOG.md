@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Overview: a Discounts section lists each discount code with its value,
+  Cvent's used / total capacity and a status (Active, Used up, Expired,
+  Inactive), then who redeemed it from the orders. Each name links to that
+  attendee's detail sheet.
+- Routes accept a query: `#/<code>/attendees?q=<search>&open=<attendee id>`
+  pre-fills the search and opens the attendee's sheet.
+- Remove the check-in button from the attendee sheet; the UI no longer writes
+  to Cvent. The check-in status badges stay. The server's
+  `POST /api/cvent/events/{code}/checkin` route is unchanged.
+
 ## v0.1.1 — 2026-09-26
 
 - Remove `run.sh`. It skipped rebuilds once a binary existed and listened on

@@ -307,7 +307,7 @@ function skeletonHtml(rows) {
 /* ---------- toast (Task 11; styles.css .toast — no helper existed before) ----------
 
    One toast element at a time (replaced per call, auto-dismissed). Used by
-   the attendee check-in (success + error paths). */
+   the attendees view's Load-more failure path. */
 function toastMsg(msg) {
   const old = document.getElementById("cvent-toast");
   if (old) old.remove();
@@ -418,7 +418,8 @@ function sectionTitle(label, badgeHtml) {
 }
 
 /* ---------- collapsible sections ----------
-   The dashboard's data sections (Registrations, Pricing, Payments, Program)
+   The dashboard's data sections (Registrations, Pricing, Discounts, Payments,
+   Program)
    collapse under their section head, which is a <button> (44px touch
    target, keyboard-operable, aria-expanded). The open/closed state
    persists per event in localStorage (cvent-data-sec-<code>). The event
@@ -645,6 +646,110 @@ function pricingCard(bundle, currency) {
     "</tbody></table></div>");
 }
 
+// "100%" for a percentage discount, else the amount off ("250 USD").
+function discountValue(d, currency) {
+  const m = (d && d.method) || {};
+  const v = Number(m.value);
+  if (!Number.isFinite(v)) return "n/a";
+  if (m.type === "BY_PERCENTAGE") return money0(v) + "%";
+  return money0(v, currency);
+}
+
+// Link to the attendees view, searched by confirmation number (unique, and
+// in both the server's and the static haystack) with that attendee's
+// detail sheet opened — the route params attendees() reads.
+function attendeeLink(code, a) {
+  const q = new URLSearchParams();
+  if (a.confirmationNumber) q.set("q", a.confirmationNumber);
+  q.set("open", a.id);
+  return "#/" + encodeURIComponent(code) + "/attendees?" + q.toString();
+}
+
+// Discounts card: one row per discount code — its value, Cvent's
+// capacity.used / capacity.total (total -1 = unlimited) and a state badge
+// (Inactive, Expired past effectiveTo, Used up at capacity, else Active) —
+// then the redemptions found on orders (orders[].discounts[] by discount
+// id), each linking to the attendee. Cancelled orders are marked: Cvent's
+// used count may still include them.
+function discountsCard(bundle, currency) {
+  const code = bundle.code || "";
+  const discounts = Array.isArray(bundle.discounts) ? bundle.discounts : [];
+  const countBadge = ' <span class="badge badge-slate">' + esc(discounts.length) + "</span>";
+  if (!discounts.length) {
+    const hint = bundle.errors && bundle.errors.discounts
+      ? "Discounts unavailable" : "No discount codes";
+    return collapsibleCard(code, "discounts", "Discounts", countBadge,
+      '<div class="empty-state"><div class="hint">' + esc(hint) + "</div></div>");
+  }
+  const attById = new Map();
+  (Array.isArray(bundle.attendees) ? bundle.attendees : []).forEach((a) => {
+    if (a && a.id) attById.set(a.id, a);
+  });
+  const uses = []; // {discount id, order, applied discount}
+  (Array.isArray(bundle.orders) ? bundle.orders : []).forEach((o) => {
+    if (!o || o.deleted) return;
+    (o.discounts || []).forEach((ad) => uses.push({ id: ad.id, code: ad.code, o, ad }));
+  });
+  const rows = discounts.map((d) => {
+    const cap = d.capacity || {};
+    const used = Number(cap.used) || 0;
+    const total = Number(cap.total);
+    const unlimited = !Number.isFinite(total) || total < 0;
+    const full = !unlimited && used >= total;
+    const expired = !!d.effectiveTo && Date.parse(d.effectiveTo) < Date.now();
+    const badge = !d.active
+      ? '<span class="badge badge-slate">Inactive</span>'
+      : expired
+        ? '<span class="badge badge-slate">Expired</span>'
+        : full
+        ? '<span class="badge badge-amber">Used up</span>'
+        : '<span class="badge badge-green">Active</span>';
+    const label = d.name && d.name !== d.code
+      ? '<div class="muted-line">' + esc(d.name) + "</div>" : "";
+    const until = d.effectiveTo
+      ? '<div class="muted-line">until ' + esc(fmtDateShort(d.effectiveTo)) + "</div>" : "";
+    return (
+      "<tr>" +
+      '<td data-val="' + esc(d.code || d.name || "") + '"><span class="mono-cell">' +
+      esc(d.code || d.name || "n/a") + "</span>" + label + "</td>" +
+      '<td class="num" data-val="' + esc(Number(d.method && d.method.value) || 0) + '">' +
+      esc(discountValue(d, currency)) + "</td>" +
+      '<td class="num" data-val="' + used + '">' + esc(used) + " / " +
+      (unlimited ? "&infin;" : esc(total)) + "</td>" +
+      "<td>" + badge + until + "</td></tr>"
+    );
+  }).join("");
+  let body =
+    '<div class="tbl-wrap"><table class="tbl sortable"><thead><tr>' +
+    sortableTh("Code") + sortableTh("Discount", true) + sortableTh("Used", true) +
+    "<th>Status</th></tr></thead><tbody>" + rows + "</tbody></table></div>";
+  if (uses.length) {
+    const urows = uses.map((u) => {
+      const a = attById.get(u.o.attendee && u.o.attendee.id);
+      const name = a ? attendeeName(a) || attendeeEmail(a) || "n/a" : "Unknown attendee";
+      const company = a && a.contact && a.contact.company;
+      const who = a
+        ? '<a class="att-link" href="' + esc(attendeeLink(code, a)) + '">' + esc(name) + "</a>"
+        : esc(name);
+      return (
+        "<tr><td>" + who +
+        (company ? '<div class="muted-line">' + esc(company) + "</div>" : "") + "</td>" +
+        '<td class="mono-cell">' + esc(u.code || "") + "</td>" +
+        '<td class="num">' + esc(money(u.ad.amount, currency)) + "</td>" +
+        '<td class="mono-cell">' + esc(u.o.number || "") +
+        (u.o.cancelled ? ' <span class="badge badge-red">Cancelled</span>' : "") +
+        "</td></tr>"
+      );
+    }).join("");
+    body +=
+      '<div class="muted-line">Redeemed by</div>' +
+      '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Attendee</th><th>Code</th>' +
+      '<th class="num">Discount</th><th>Order</th></tr></thead><tbody>' + urows +
+      "</tbody></table></div>";
+  }
+  return collapsibleCard(code, "discounts", "Discounts", countBadge, body);
+}
+
 // Status badge from the payment row's own status (server: paid/partial/
 // unpaid), with the spec's arithmetic as fallback when the field is absent.
 function orderStatusBadge(o) {
@@ -757,6 +862,7 @@ function dashboardHtml(bundle, payments) {
     headerCard(bundle) +
     registrationsCard(bundle) +
     pricingCard(bundle, currency) +
+    discountsCard(bundle, currency) +
     paymentsCard(bundle.code || "", payments, currency) +
     programCard(bundle)
   );
@@ -958,8 +1064,8 @@ function ensureNavWatch() {
   attNavWatch = true;
   window.addEventListener("hashchange", () => {
     const h = (location.hash || "").replace(/^#/, "") || "/";
-    // attendees route is #/<code>/attendees — any other path is "away".
-    if (!/\/attendees\/?$/.test(h)) {
+    // attendees route is #/<code>/attendees[?…] — any other path is "away".
+    if (!/\/attendees\/?(\?.*)?$/.test(h)) {
       attSeq++; // "close": invalidate the torn-down instance
       closeSheet();
     }
@@ -974,13 +1080,13 @@ function closeSheet() {
 }
 
 /* ---------- attendees view (Task 11) ----------
-   Search (300 ms debounce) + table + bottom-sheet detail + optimistic
-   check-in. Same render rules as the dashboard: every data string through
+   Search (300 ms debounce) + table + read-only bottom-sheet detail. Same
+   render rules as the dashboard: every data string through
    esc(), skeleton rows while the first search loads, an error card with
    Retry on failure, no console.log, no hardcoded event code. Static and
    live share one render path — the only differences are the Snapshot
-   badge (sheet header), the hidden check-in button, and the static-mode
-   file search inside searchAttendees.
+   badge (sheet header) and the static-mode file search inside
+   searchAttendees.
 
    Attendee field ground truth (openapi.json "attendee" schema):
      name        contact.{firstName,middleName,lastName} — no top-level name
@@ -1113,36 +1219,7 @@ function attendeeSheetHtml(a, qmap) {
     }
     inner += "</dl>";
   }
-  // Check in: live mode only. Already checked in → disabled 'Checked in'
-  // (check-out is out of scope for v1). Static mode → no button (the
-  // Snapshot badge above marks the snapshot state).
-  if (a.id && !STATIC) {
-    inner += checked
-      ? '<button class="btn" disabled type="button">Checked in</button>'
-      : '<button class="btn" data-checkin type="button">Check in</button>';
-  }
   return inner;
-}
-
-// POST /api/cvent/events/<code>/checkin. Client body (the plan contract
-// the server handler implements, handlers.go handleCheckin):
-// { attendeeIds: [uuid] }.
-// The server maps it onto the Cvent bulk-checkin spec and returns
-// { ok: true } on success; errors surface as non-OK JSON { error }.
-async function checkInAttendee(code, id) {
-  const res = await fetch(API + "/events/" + encodeURIComponent(code) + "/checkin", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ attendeeIds: [id] }),
-  });
-  if (!res.ok) {
-    let msg = "HTTP " + res.status;
-    try {
-      const j = await res.json();
-      if (j && j.error) msg = j.error;
-    } catch (e) { /* keep the HTTP message */ }
-    throw new Error(msg);
-  }
 }
 
 function searchCardHtml(value) {
@@ -1208,7 +1285,10 @@ function attendeesTableHtml(st) {
   );
 }
 
-export function attendees(mount, code) {
+// params (route query, optional): q pre-fills the search; open=<attendee id>
+// opens that attendee's sheet once the first page loads (the Discounts
+// card links here).
+export function attendees(mount, code, params) {
   // New instance: bump the sequence (invalidating any previous instance's
   // pending continuations) and drop the previous instance's pending search
   // timer. The token is the authoritative stale guard; the clearTimeout is
@@ -1225,7 +1305,11 @@ export function attendees(mount, code) {
   clearTimeout(attDebounce);
   closeSheet(); // route change — drop any open sheet + restore body scroll
   ensureNavWatch(); // restore body scroll on navigation-away (no unmount hook)
-  const state = { q: "", items: [], questions: {}, result: null, loading: false };
+  const state = {
+    q: (params && params.get("q")) || "",
+    items: [], questions: {}, result: null, loading: false,
+  };
+  let openId = (params && params.get("open")) || "";
 
   // The one search listener, re-attached after every re-render (mount
   // innerHTML replacement drops it). 300 ms debounce per the view spec. The
@@ -1346,6 +1430,11 @@ export function attendees(mount, code) {
     }
     if (!isCurrent() || !isMounted()) return; // navigated away mid-fetch
     render(mount, attendeesTableHtml(state));
+    if (openId) {
+      const a = state.items.find((x) => x && x.id === openId);
+      openId = ""; // once — later searches don't reopen it
+      if (a) openSheet(a);
+    }
   }
 
   function openSheet(a) {
@@ -1359,66 +1448,14 @@ export function attendees(mount, code) {
       "</div>";
     (document.body || document).appendChild(wrap);
     document.body.style.overflow = "hidden"; // body scroll lock (house-style)
-    // Delegation on the wrapper only — innerHTML swaps (check-in flips)
-    // never orphan the close/check-in listeners.
+    // Delegation on the wrapper: the backdrop, handle and close button all
+    // carry data-sheet-close.
     wrap.addEventListener("click", (e) => {
       const t = e && e.target;
       if (!t || !t.closest) return;
       if (t.closest("[data-sheet-close]")) closeSheet();
-      else if (t.closest("[data-checkin]")) doCheckin(a);
     });
     sheetEl = wrap;
-  }
-
-  // Swap just this row's check-in badge (no full re-render, so scroll and
-  // the open sheet are undisturbed).
-  function paintChecked(a, checked) {
-    const i = state.items.indexOf(a);
-    if (i < 0) return;
-    const tr = mount.querySelector('[data-row="' + i + '"]');
-    const td = tr && tr.children[tr.children.length - 1];
-    if (!td) return;
-    td.innerHTML = checked
-      ? '<span class="badge badge-green">Checked in</span>'
-      : '<span class="badge badge-slate">Not checked in</span>';
-  }
-
-  // Optimistic check-in: flip the row badge + sheet button NOW, POST, then
-  // keep the flip on success or revert both + error toast on failure.
-  function doCheckin(a) {
-    if (!a.id || state.loading) return;
-    const was = !!a.checkedIn;
-    a.checkedIn = true; // optimistic flip (data + UI)
-    paintChecked(a, true);
-    if (sheetEl) {
-      // Re-render the sheet panel (button → disabled 'Checked in'); the
-      // wrapper keeps its delegated listeners.
-      const panel = sheetEl.querySelector(".sheet-panel");
-      if (panel) {
-        panel.innerHTML =
-          '<span class="sheet-handle" data-sheet-close></span>' +
-          attendeeSheetHtml(a, state.questions);
-      }
-    }
-    checkInAttendee(code, a.id)
-      .then(() => {
-        toastMsg("Checked in");
-      })
-      .catch((e) => {
-        a.checkedIn = was; // revert the data
-        const msg = e && e.message ? e.message : "unknown error";
-        toastMsg("Check-in failed: " + msg); // app-level toast: keep even if stale
-        if (!isCurrent() || !isMounted()) return; // no badge/sheet paint onto the new view
-        paintChecked(a, false);
-        if (sheetEl) {
-          const panel = sheetEl.querySelector(".sheet-panel");
-          if (panel) {
-            panel.innerHTML =
-              '<span class="sheet-handle" data-sheet-close></span>' +
-              attendeeSheetHtml(a, state.questions);
-          }
-        }
-      });
   }
 
   render(mount, skeletonHtml(6)); // initial: search + skeleton

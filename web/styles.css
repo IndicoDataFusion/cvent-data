@@ -499,6 +499,11 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
 /* Early-bird cell: amount on top, "by <date>" deadline stacked beneath it. */
 .tbl .eb-amount { font-variant-numeric: tabular-nums; }
 .tbl .eb-amount + .muted-line { margin-top: 2px; line-height: 1.2; }
+/* Discounts card: secondary lines inside cells sit tight under the value;
+   the redeeming attendee's name links to their detail sheet. */
+.tbl td .muted-line { margin-top: 2px; line-height: 1.2; }
+.tbl .att-link { color: var(--accent); text-decoration: none; font-weight: 600; }
+.tbl .att-link:hover, .tbl .att-link:focus-visible { text-decoration: underline; }
 /* Sortable column headers: tap to sort (asc → desc → original). The
    indicator arrow sits after the label, dim until active. */
 .tbl th[data-sort] { user-select: none; -webkit-user-select: none; }

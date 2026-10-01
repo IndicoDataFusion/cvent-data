@@ -82,8 +82,8 @@ top-level + filter (`POST /admission-items/filter`).
 | `GET /events/{id}/registration-types` | ticket types (code, capacity, openForRegistration) |
 | `GET /events/{id}/registration-paths` | registration flows |
 | `GET /events/{id}/emails` | email campaigns (htmlBody, clickTrackingEnabled) |
-| `GET /events/{id}/discounts` | discount codes |
-| `GET /events/{id}/discounts/agenda-items` | per-session discounts (none) |
+| `GET /events/{id}/discounts` | discount codes; `capacity.{total,used}` is the redemption count (`total` -1 = unlimited) |
+| `GET /events/{id}/discounts/agenda-items` | admission items / sessions each discount is limited to (`{id, type, discount.id}`) |
 
 ## Writes (only one scope)
 

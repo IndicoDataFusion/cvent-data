@@ -8,6 +8,8 @@
  *   #/                    → the source's "events" landing (event list)
  *   #/<code>              → that event's "home" dashboard
  *   #/<code>/<viewKey>    → that event's <viewKey> view (e.g. attendees)
+ *   …?k=v                 → optional query, passed to the view as params
+ *                           (e.g. #/<code>/attendees?q=…&open=<id>)
  * The event code is read from the hash and passed to the view; it is never
  * hardcoded. The topbar event selector mirrors the route and lets the user
  * jump between events without losing the current view.
@@ -53,7 +55,10 @@ const viewTabs = document.getElementById("view-tabs");
    view key, so it can't collide with a view name. */
 
 function parseRoute() {
-  const path = location.hash.replace(/^#/, "") || "/";
+  const raw = location.hash.replace(/^#/, "") || "/";
+  const qi = raw.indexOf("?");
+  const path = qi < 0 ? raw : raw.slice(0, qi);
+  const params = new URLSearchParams(qi < 0 ? "" : raw.slice(qi + 1));
   const parts = path.split("/").filter(Boolean);
   if (parts.length === 0) {
     // #/ → the events landing (no event code).
@@ -63,13 +68,13 @@ function parseRoute() {
   const code = decodeURIComponent(parts[0]);
   if (parts.length === 1) {
     // #/<code> → that event's home dashboard.
-    if (views.home) return { view: "home", code };
+    if (views.home) return { view: "home", code, params };
     return null;
   }
   if (parts.length === 2) {
     // #/<code>/<viewKey> → that event's named view.
     const view = parts[1];
-    if (views[view]) return { view, code };
+    if (views[view]) return { view, code, params };
   }
   return null; // unknown shape
 }
@@ -86,7 +91,7 @@ function route() {
   }
   mount.innerHTML = ""; // clear the mount before every render
   if (r.view === "events") views.events(mount);
-  else views[r.view](mount, r.code);
+  else views[r.view](mount, r.code, r.params);
   syncEventSelect(r.code);
   syncViewTabs(r);
 }
