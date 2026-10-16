@@ -45,19 +45,37 @@ import "github.com/IndicoDataFusion/cvent-data/cvent"
 
 c := cvent.New(cvent.DefaultBaseURL, clientID, clientSecret)
 atts, err := cvent.FetchRegistrants(ctx, c, "EXAMPLECODE", cvent.RegistrantsOptions{
-	WithPayments: true, // also read orders + transactions
+	WithPayments:       true, // also read orders, order items + transactions
+	WithBillingAddress: true, // also read each charge's billing address
 })
 for _, a := range atts {
 	// a.FullName, a.Email, a.Status, a.Ref (the Indico Ref # answer, trimmed),
+	// a.RegistrationType (the member type), a.Company, a.Title, a.MobilePhone,
+	// a.EmergencyContactName / Phone, a.VisaLetter ("Yes" | "No"),
+	// a.Address, a.InvoiceAddress() (billing address, else a.Address),
+	// a.Guests (companions; a guest has Guest + PrimaryID), a.Answers
+	// (question text + value), a.CustomFields (every contact custom field).
 	// a.Payment (nil without an order): Status is paid | partial | unpaid |
 	// waived | cancelled, plus Ordered/Paid/Due/Refunded, Currency, Method,
-	// LastPaymentDate, Invoices, Discounts and OriginalAmount (before discounts).
+	// LastPaymentDate, Invoices, Discounts, OriginalAmount (before discounts)
+	// and Items (the selected order lines; a guest's fee has ForGuest).
 }
 ```
 
 - `FetchRegistrants` resolves a short event code or uuid, then fetches only
-  attendees and event questions (plus orders and transactions with
-  `WithPayments`), not the full bundle.
+  attendees and event questions (plus orders, order items and transactions
+  with `WithPayments`), not the full bundle.
+- The emergency contact and visa-letter answers are contact custom fields,
+  not event questions; they are matched by field name
+  (`EmergencyContactNamePattern`, `EmergencyContactPhonePattern`,
+  `VisaLetterPattern`).
+- Guests are attendees of their own (`Guest`, `PrimaryID`) and are listed on
+  their primary in `Guests`. A guest's fee is a line on the primary's order,
+  so guests have no `Payment`.
+- Billing addresses exist only on the transaction detail, so
+  `WithBillingAddress` makes one `GET /transactions/{id}` per successful
+  charge. Card payments carry one; bank transfers do not, and
+  `InvoiceAddress()` then falls back to the contact address.
 - `Ref` is the answer to the question whose text matches
   `DefaultRefQuestionPattern` ("Indico … Ref"/"reference"); pin another
   question with `RegistrantsOptions.RefQuestionID`.
@@ -66,7 +84,8 @@ for _, a := range atts {
   paid → `partial`; otherwise `unpaid`. Orders carry no currency, so it
   comes from the transactions, else the event.
 - Pure helpers for data you already hold: `RegistrantsFrom`,
-  `RefQuestionID`, `PaymentsByAttendee`, and `BuildPayments` (the event-wide
+  `LabelAnswers`, `RefQuestionID`, `PaymentsByAttendee`,
+  `OrderItemsByAttendee`, and `BuildPayments` (the event-wide
   money view). `FromEnvironment` reads credentials from the environment or
   a `.env`; `NewEventCache(c).Bundle(ctx, code)` returns the full 13-resource
   bundle.

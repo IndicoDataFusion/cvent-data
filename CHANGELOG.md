@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- `Registrant` carries the full registration form: `Title`, `MobilePhone`,
+  `EmergencyContactName` / `EmergencyContactPhone` and `VisaLetter` (from
+  contact custom fields), `Address`, `CustomFields`, and `Answers` with
+  their question text (`LabelAnswers`).
+- Guests: `Guest` and `PrimaryID` on the guest, `Guests` on the primary.
+- `WithPayments` also fills `AttendeePayment.Items`, the selected order
+  lines (`OrderItemsByAttendee`); a guest's fee has `ForGuest`.
+- `RegistrantsOptions.WithBillingAddress` fills `BillingAddress` from the
+  transaction details (`Client.BillingAddresses`); `InvoiceAddress()`
+  prefers it over the contact address.
+- `FetchRegistrants` now always fetches the event questions, also when
+  `RefQuestionID` is pinned, to label the answers.
 - Overview: a Discounts section lists each discount code with its value,
   Cvent's used / total capacity and a status (Active, Used up, Expired,
   Inactive), then who redeemed it from the orders. Each name links to that
