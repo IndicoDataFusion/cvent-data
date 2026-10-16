@@ -377,28 +377,9 @@ func (c *Client) getOnePage(ctx context.Context, path string, extra url.Values) 
 			q.Add(k, v)
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		strings.TrimRight(c.base, "/")+path+"?"+q.Encode(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("cvent %s: %v", path, err)
-	}
-	tok, err := c.token(ctx)
+	raw, err := c.getBody(ctx, path, q)
 	if err != nil {
 		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+tok)
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("cvent %s: %v", path, err)
-	}
-	raw, rerr := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	resp.Body.Close()
-	if rerr != nil {
-		return nil, fmt.Errorf("cvent %s: reading body: %v", path, rerr)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("cvent %s: HTTP %d", path, resp.StatusCode)
 	}
 
 	var probe struct {
@@ -430,4 +411,48 @@ func (c *Client) getOnePage(ctx context.Context, path string, extra url.Values) 
 		return raw, nil // single-object shape (GET /events/{uuid})
 	}
 	return nil, fmt.Errorf("cvent %s: unrecognized response shape (no items, no id)", path)
+}
+
+// getObject GETs a single-object endpoint (e.g. /transactions/{id}) and
+// returns its body.
+func (c *Client) getObject(ctx context.Context, path string) (json.RawMessage, error) {
+	raw, err := c.getBody(ctx, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !json.Valid(raw) {
+		return nil, fmt.Errorf("cvent %s: response is not JSON", path)
+	}
+	return raw, nil
+}
+
+// getBody performs one authenticated GET and returns the body of a 200.
+func (c *Client) getBody(ctx context.Context, path string, q url.Values) ([]byte, error) {
+	u := strings.TrimRight(c.base, "/") + path
+	if len(q) > 0 {
+		u += "?" + q.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("cvent %s: %v", path, err)
+	}
+	tok, err := c.token(ctx)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("cvent %s: %v", path, err)
+	}
+	raw, rerr := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	resp.Body.Close()
+	if rerr != nil {
+		return nil, fmt.Errorf("cvent %s: reading body: %v", path, rerr)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("cvent %s: HTTP %d", path, resp.StatusCode)
+	}
+	return raw, nil
 }
