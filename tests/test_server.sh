@@ -201,11 +201,11 @@ assert d["total"] == 2, f"total != 2: {d['total']}"
 assert len(d["items"]) == 2, f"items != 2"
 ids = sorted(i["id"] for i in d["items"])
 assert ids == ["att-001", "att-002"], ids
-# questions: id -> {text, type} for exactly the answered questions (Alice's
-# two); the unanswered SL_* system field is left out.
-qs = d["questions"]
-assert set(qs) == {"q-terms", "q-first"}, qs
-assert qs["q-first"] == {"text": "First time attending", "type": "SingleChoice"}, qs
+# items are Registrants: Alice's answers carry their question text.
+alice = next(i for i in d["items"] if i["id"] == "att-001")
+assert alice["fullName"] == "Alice Zetar", alice
+labels = {a["questionId"]: a["question"] for a in alice["answers"]}
+assert labels == {"q-terms": "Terms and Conditions", "q-first": "First time attending"}, labels
 PY
 
 code=$(curl -s -o "$WORK/att_nomatch.json" -w '%{http_code}' \

@@ -251,45 +251,48 @@ func TestAttendeesSearchAndPaging(t *testing.T) {
 	}
 }
 
-// TestAttendeesQuestionLabels: the search response carries question id →
-// {text, type} for exactly the questions the returned attendees answered —
-// not the rest of the event's questions, and not unknown ids.
-func TestAttendeesQuestionLabels(t *testing.T) {
+// TestAttendeesRegistrants: search items are Registrants built from the
+// bundle — answers labelled with their question text, guests linked both
+// ways, and the order lines on the primary's payment.
+func TestAttendeesRegistrants(t *testing.T) {
 	client := cvent.New("http://127.0.0.1:0", "c", "s")
 	ec := cvent.NewEventCache(client)
 	h := newCventHandlers("TESTCODE01", client, ec)
 	b := &cvent.EventBundle{Code: "TESTCODE01", PulledAt: time.Now().UTC().Format(time.RFC3339)}
-	b.Event = json.RawMessage(`{"id":"` + testCheckinUUID + `"}`)
+	b.Event = json.RawMessage(`{"id":"` + testCheckinUUID + `","currency":"USD"}`)
 	b.Attendees = json.RawMessage(`[
-		{"id":"a1","contact":{"firstName":"Ada"},"answers":[{"question":{"id":"q1"},"value":["yes"]},{"question":{"id":"qx"},"value":["?"]}]},
-		{"id":"a2","contact":{"firstName":"Grace"},"answers":[{"question":{"id":"q2"},"value":["no"]}]}
+		{"id":"a1","confirmationNumber":"C1","contact":{"firstName":"Ada","lastName":"Lovelace"},"answers":[{"question":{"id":"q1"},"value":["yes"]}]},
+		{"id":"g1","confirmationNumber":"C2","guest":true,"primaryId":"a1","contact":{"firstName":"Byron","lastName":"Lovelace"}}
 	]`)
-	b.EventQuestions = json.RawMessage(`[
-		{"id":"q1","text":"Terms accepted","type":"MultiChoice"},
-		{"id":"q2","text":"First time attending","type":"SingleChoice"},
-		{"id":"q3","text":"SL_DURATION11","type":"OpenEndedTextOneLine"}
-	]`)
+	b.EventQuestions = json.RawMessage(`[{"id":"q1","text":"Terms accepted","type":"MultiChoice"}]`)
+	b.Orders = json.RawMessage(`[{"id":"o1","attendee":{"id":"a1"},"amountOrdered":360,"amountPaid":360,"amountDue":0}]`)
+	b.OrderItems = json.RawMessage(`[{"order":{"id":"o1"},"attendee":{"id":"a1"},"guest":true,"name":"Companion/Guest Registration","amountOrdered":360,"amountPaid":360}]`)
 	ec.Put(h.defaultCode, b)
 
-	get := func(url string) map[string]map[string]string {
-		rec := httptest.NewRecorder()
-		h.route(rec, httptest.NewRequest(http.MethodGet, url, nil))
-		var out struct {
-			Questions map[string]map[string]string `json:"questions"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
-		return out.Questions
+	rec := httptest.NewRecorder()
+	h.route(rec, httptest.NewRequest(http.MethodGet, "/api/cvent/events/TESTCODE01/attendees", nil))
+	var out struct {
+		Total int                `json:"total"`
+		Items []cvent.Registrant `json:"items"`
 	}
-	all := get("/api/cvent/events/TESTCODE01/attendees")
-	if len(all) != 2 || all["q1"]["text"] != "Terms accepted" || all["q2"]["type"] != "SingleChoice" {
-		t.Fatalf("questions = %v, want q1+q2 only", all)
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
 	}
-	// Scoped to the returned page: only Ada's answers.
-	ada := get("/api/cvent/events/TESTCODE01/attendees?q=ada")
-	if len(ada) != 1 || ada["q1"]["text"] != "Terms accepted" {
-		t.Fatalf("questions for q=ada = %v, want q1 only", ada)
+	if out.Total != 2 {
+		t.Fatalf("total = %d, want 2", out.Total)
+	}
+	ada, byron := out.Items[0], out.Items[1]
+	if len(ada.Answers) != 1 || ada.Answers[0].Question != "Terms accepted" {
+		t.Errorf("answers = %+v", ada.Answers)
+	}
+	if len(ada.Guests) != 1 || ada.Guests[0].ID != "g1" || byron.RegisteredBy == nil || byron.RegisteredBy.ConfirmationNumber != "C1" {
+		t.Errorf("guest links: %+v / %+v", ada.Guests, byron.RegisteredBy)
+	}
+	if ada.Payment == nil || len(ada.Payment.Items) != 1 || !ada.Payment.Items[0].ForGuest || ada.Payment.Currency != "USD" {
+		t.Errorf("payment = %+v", ada.Payment)
+	}
+	if byron.Payment != nil {
+		t.Errorf("guest payment = %+v, want nil", byron.Payment)
 	}
 }
 

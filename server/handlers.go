@@ -202,10 +202,11 @@ func attendeeIDAndName(raw json.RawMessage) (string, string) {
 	return strField(a, "id"), joinName(first, middle, last)
 }
 
-// handleAttendees searches the cached attendees for code: case-insensitive
-// substring over all name parts + email + confirmationNumber. limit defaults
-// to 50 and caps at 200; offset defaults to 0. items are the raw attendee
-// objects.
+// handleAttendees searches the cached event's Registrants
+// (cvent.RegistrantsFromBundle): case-insensitive substring over the name,
+// email and confirmation number. limit defaults to 50 and caps at 200;
+// offset defaults to 0. items are cvent.Registrant records, with labelled
+// answers, guest links, payment and order lines.
 func (h *cventHandlers) handleAttendees(w http.ResponseWriter, r *http.Request, code string) {
 	b, err := h.cache.Bundle(r.Context(), code)
 	if err != nil {
@@ -229,104 +230,30 @@ func (h *cventHandlers) handleAttendees(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 
-	var all []json.RawMessage
-	if len(b.Attendees) > 0 {
-		_ = json.Unmarshal(b.Attendees, &all)
-	}
-	var matched []json.RawMessage
-	for _, raw := range all {
-		if q != "" && !attendeeMatches(raw, q) {
-			continue
+	matched := []cvent.Registrant{}
+	for _, reg := range cvent.RegistrantsFromBundle(b, "") {
+		if q == "" || registrantMatches(&reg, q) {
+			matched = append(matched, reg)
 		}
-		matched = append(matched, raw)
 	}
-	items := []json.RawMessage{}
+	items := []cvent.Registrant{}
 	if offset < len(matched) {
-		end := offset + limit
-		if end > len(matched) {
-			end = len(matched)
-		}
-		items = matched[offset:end]
+		items = matched[offset:min(offset+limit, len(matched))]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"total":     len(matched),
-		"offset":    offset,
-		"limit":     limit,
-		"items":     items,
-		"questions": answeredQuestions(b.EventQuestions, items),
+		"total":  len(matched),
+		"offset": offset,
+		"limit":  limit,
+		"items":  items,
 	})
 }
 
-// questionInfo is the label the UI shows for an attendee answer.
-type questionInfo struct {
-	Text string `json:"text"`
-	Type string `json:"type,omitempty"`
-}
-
-// answeredQuestions maps question id → {text, type} for just the questions
-// the given attendees answered (answers[].question.id), so the detail sheet
-// can label answers without downloading the whole question list. Unknown
-// ids are left out (the UI falls back to the raw id).
-func answeredQuestions(eventQuestions json.RawMessage, items []json.RawMessage) map[string]questionInfo {
-	out := map[string]questionInfo{}
-	var qs []struct {
-		ID   string `json:"id"`
-		Text string `json:"text"`
-		Type string `json:"type"`
-	}
-	if len(eventQuestions) == 0 || json.Unmarshal(eventQuestions, &qs) != nil {
-		return out
-	}
-	byID := make(map[string]questionInfo, len(qs))
-	for _, q := range qs {
-		byID[q.ID] = questionInfo{Text: q.Text, Type: q.Type}
-	}
-	for _, raw := range items {
-		var a struct {
-			Answers []struct {
-				Question struct {
-					ID string `json:"id"`
-				} `json:"question"`
-			} `json:"answers"`
-		}
-		if json.Unmarshal(raw, &a) != nil {
-			continue
-		}
-		for _, ans := range a.Answers {
-			if q, ok := byID[ans.Question.ID]; ok {
-				out[ans.Question.ID] = q
-			}
-		}
-	}
-	return out
-}
-
-// attendeeMatches reports whether q (lowercased) occurs in any of the
-// attendee's name parts, email, or confirmation number.
-func attendeeMatches(raw json.RawMessage, q string) bool {
-	var a map[string]any
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return false
-	}
-	var fields []string
-	add := func(m map[string]any, keys ...string) {
-		for _, k := range keys {
-			if s, ok := m[k].(string); ok {
-				fields = append(fields, s)
-			}
-		}
-	}
-	nameKeys := []string{"firstName", "middleName", "lastName", "givenName", "familyName", "first", "middle", "last"}
-	if nm, ok := a["name"].(map[string]any); ok {
-		add(nm, nameKeys...)
-	}
-	add(a, nameKeys...)
-	if ct, ok := a["contact"].(map[string]any); ok {
-		add(ct, append(nameKeys, "email")...)
-	}
-	add(a, "email", "confirmationNumber")
-	for _, f := range fields {
-		if strings.Contains(strings.ToLower(f), q) {
+// registrantMatches reports whether q (lowercased) occurs in the
+// registrant's name parts, full name, email, or confirmation number — the
+// same haystack as the static-mode search in web/sources/cvent.js.
+func registrantMatches(r *cvent.Registrant, q string) bool {
+	for _, f := range []string{r.FullName, r.FirstName, r.MiddleName, r.LastName, r.Email, r.ConfirmationNumber} {
+		if f != "" && strings.Contains(strings.ToLower(f), q) {
 			return true
 		}
 	}
