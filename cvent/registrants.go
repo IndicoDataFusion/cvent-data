@@ -43,10 +43,14 @@ type Registrant struct {
 	VisaLetter            string `json:"visaLetter,omitempty"` // answer as given: "Yes", "No" or empty
 	// Address is the contact's primary address (work or home, per
 	// primaryAddressType); nil when none was entered.
-	Address   *Address   `json:"address,omitempty"`
-	Guest     bool       `json:"guest,omitempty"`
-	PrimaryID string     `json:"primaryId,omitempty"`
-	Guests    []GuestRef `json:"guests,omitempty"`
+	Address *Address `json:"address,omitempty"`
+	// BillingAddress is the billing address of the attendee's latest card
+	// payment; set only with RegistrantsOptions.WithBillingAddress. See
+	// InvoiceAddress.
+	BillingAddress *Address   `json:"billingAddress,omitempty"`
+	Guest          bool       `json:"guest,omitempty"`
+	PrimaryID      string     `json:"primaryId,omitempty"`
+	Guests         []GuestRef `json:"guests,omitempty"`
 	// CustomFields maps every answered contact custom field name to its
 	// answer (multiple values joined with "; ").
 	CustomFields map[string]string `json:"customFields,omitempty"`
@@ -103,6 +107,15 @@ type Answer struct {
 	Value      string `json:"value"` // multiple values joined with "; "
 }
 
+// InvoiceAddress is the address to invoice: the card billing address when
+// known, else the contact's address. Nil when neither is set.
+func (r *Registrant) InvoiceAddress() *Address {
+	if !r.BillingAddress.IsZero() {
+		return r.BillingAddress
+	}
+	return r.Address
+}
+
 // RegistrantsOptions tunes RegistrantsFrom / FetchRegistrants.
 type RegistrantsOptions struct {
 	// RefQuestionID pins the event question whose answer is the Ref #.
@@ -112,6 +125,10 @@ type RegistrantsOptions struct {
 	// transactions and fills Registrant.Payment (needs the
 	// orders/transactions read scopes).
 	WithPayments bool
+	// WithBillingAddress fills Registrant.BillingAddress. Billing addresses
+	// are only on the transaction detail, so this costs one GET
+	// /transactions/{id} per successful charge.
+	WithBillingAddress bool
 }
 
 // Custom field names matched (case-insensitively) for the dedicated
@@ -300,8 +317,8 @@ func nonEmpty(ss ...string) []string {
 
 // FetchRegistrants resolves the event (short code or uuid) and returns its
 // attendees as Registrants. It fetches only attendees and event questions
-// (plus orders, order items and transactions with WithPayments), not the
-// full bundle.
+// (plus orders, order items and transactions with WithPayments, and the
+// transaction details with WithBillingAddress), not the full bundle.
 func FetchRegistrants(ctx context.Context, c *Client, code string, opts RegistrantsOptions) ([]Registrant, error) {
 	eventRaw, ev, err := c.resolveEvent(ctx, code)
 	if err != nil {
@@ -326,6 +343,8 @@ func FetchRegistrants(ctx context.Context, c *Client, code string, opts Registra
 		wg.Go(func() {
 			orderItems, iErr = c.listAll(ctx, "/events/"+ev.ID+"/orders/items", nil)
 		})
+	}
+	if opts.WithPayments || opts.WithBillingAddress {
 		wg.Go(func() {
 			transactions, tErr = c.listAll(ctx, "/events/"+ev.ID+"/transactions", nil)
 		})
@@ -371,6 +390,15 @@ func FetchRegistrants(ctx context.Context, c *Client, code string, opts Registra
 				p.Items = items[regs[i].ID]
 			}
 			regs[i].Payment = p
+		}
+	}
+	if opts.WithBillingAddress {
+		addrs, err := c.BillingAddresses(ctx, transactions)
+		if err != nil {
+			return nil, fmt.Errorf("billing addresses: %w", err)
+		}
+		for i := range regs {
+			regs[i].BillingAddress = addrs[regs[i].ID]
 		}
 	}
 	return regs, nil

@@ -89,6 +89,9 @@ func TestFetchRegistrantsWithPayments(t *testing.T) {
 	if items := rs[0].Payment.Items; len(items) != 1 || items[0].Name != "Conference Registration" {
 		t.Fatalf("items = %+v, want the conference registration", items)
 	}
+	if rs[0].BillingAddress != nil {
+		t.Fatalf("BillingAddress without WithBillingAddress = %+v", rs[0].BillingAddress)
+	}
 }
 
 func TestOrderItemsByAttendee(t *testing.T) {
@@ -108,5 +111,47 @@ func TestOrderItemsByAttendee(t *testing.T) {
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("OrderItemsByAttendee = %+v\nwant %+v", got, want)
+	}
+}
+
+func TestFetchRegistrantsWithBillingAddress(t *testing.T) {
+	m := newCventMock(t)
+	m.setEventEndpoints()
+	m.setSingle("/attendees/filter", itemsPage(regAttFull, regAttRef))
+	m.setSingle("/event-questions", itemsPage(regQRef))
+	m.setSingle("/events/"+testUUID+"/transactions", itemsPage(
+		`{"id":"t-old","attendee":{"id":"p1"},"success":true,"paymentType":"Online Charge","date":"2026-07-01T00:00:00Z"}`,
+		`{"id":"t-new","attendee":{"id":"p1"},"success":true,"paymentType":"Online Charge","date":"2026-08-01T00:00:00Z"}`,
+		`{"id":"t-bank","attendee":{"id":"p1"},"success":true,"paymentType":"Offline Charge","date":"2026-09-01T00:00:00Z"}`,
+		`{"id":"t-refund","attendee":{"id":"p1"},"success":true,"paymentType":"Online Refund","date":"2026-10-01T00:00:00Z"}`,
+		`{"id":"t-failed","attendee":{"id":"a1"},"success":false,"paymentType":"Online Charge"}`,
+	))
+	m.setSingle("/transactions/t-old", []byte(`{"id":"t-old","billingAddress":{"address1":"Old Rd","city":"X"}}`))
+	m.setSingle("/transactions/t-new", []byte(`{"id":"t-new","billingAddress":{"address1":"2 Bank Rd","city":"Lansing","countryCode":"US"}}`))
+	m.setSingle("/transactions/t-bank", []byte(`{"id":"t-bank","billingAddress":{}}`))
+	c := newCventClient(m.srv.URL, "cid", "secret")
+	warmToken(c)
+
+	rs, err := FetchRegistrants(t.Context(), c, testCode, RegistrantsOptions{WithBillingAddress: true})
+	if err != nil {
+		t.Fatalf("FetchRegistrants: %v", err)
+	}
+	if b := rs[0].BillingAddress; b == nil || b.Address1 != "2 Bank Rd" {
+		t.Fatalf("BillingAddress = %+v, want the latest addressed charge (2 Bank Rd)", b)
+	}
+	if rs[0].InvoiceAddress() != rs[0].BillingAddress || rs[1].BillingAddress != nil {
+		t.Fatalf("invoice = %+v, a1 billing = %+v", rs[0].InvoiceAddress(), rs[1].BillingAddress)
+	}
+	if m.count("/transactions/t-refund") != 0 || m.count("/transactions/t-failed") != 0 {
+		t.Fatal("refund/failed transaction details fetched")
+	}
+	if m.count("/events/"+testUUID+"/orders") != 0 {
+		t.Fatal("orders fetched without WithPayments")
+	}
+
+	// A failing detail request fails the fetch.
+	m.setStatus("/transactions/t-old", 403, []byte(`{}`))
+	if _, err := FetchRegistrants(t.Context(), c, testCode, RegistrantsOptions{WithBillingAddress: true}); err == nil {
+		t.Fatal("want an error when a transaction detail fails")
 	}
 }

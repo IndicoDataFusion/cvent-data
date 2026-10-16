@@ -91,6 +91,13 @@ func TestRegistrantsFromForm(t *testing.T) {
 	if got := p.Address.String(); got != "1 Main St, Lansing, Michigan, 48824, United States" {
 		t.Errorf("Address = %q", got)
 	}
+	if p.InvoiceAddress() != p.Address {
+		t.Errorf("InvoiceAddress without billing = %v, want the contact address", p.InvoiceAddress())
+	}
+	p.BillingAddress = &Address{Address1: "2 Bank Rd", City: "Lansing"}
+	if p.InvoiceAddress() != p.BillingAddress {
+		t.Errorf("InvoiceAddress with billing = %v, want the billing address", p.InvoiceAddress())
+	}
 	wantAns := []Answer{{QuestionID: "q-other", Value: "Yes"}, {QuestionID: "q-diet", Value: "Vegan; Nut allergy"}}
 	if !reflect.DeepEqual(p.Answers, wantAns) {
 		t.Errorf("Answers = %+v, want %+v (blank answer dropped)", p.Answers, wantAns)
