@@ -18,8 +18,8 @@ import (
 //
 // Guests (companions) are registrants of their own with Guest set and
 // PrimaryID naming the attendee who registered them; that attendee lists
-// them in Guests. A guest's fee is on the primary's order, so a guest has
-// no Payment of their own.
+// them in Guests. A guest's fee is an item on the primary's order
+// (OrderItem.ForGuest), so a guest has no Payment of their own.
 type Registrant struct {
 	ID                 string `json:"id"`
 	FirstName          string `json:"firstName"`
@@ -108,8 +108,9 @@ type RegistrantsOptions struct {
 	// RefQuestionID pins the event question whose answer is the Ref #.
 	// Empty = auto-detect by question text (see DefaultRefQuestionPattern).
 	RefQuestionID string
-	// WithPayments also fetches the event's orders and transactions and
-	// fills Registrant.Payment (needs the orders/transactions read scopes).
+	// WithPayments also fetches the event's orders, order items and
+	// transactions and fills Registrant.Payment (needs the
+	// orders/transactions read scopes).
 	WithPayments bool
 }
 
@@ -299,7 +300,8 @@ func nonEmpty(ss ...string) []string {
 
 // FetchRegistrants resolves the event (short code or uuid) and returns its
 // attendees as Registrants. It fetches only attendees and event questions
-// (plus orders and transactions with WithPayments), not the full bundle.
+// (plus orders, order items and transactions with WithPayments), not the
+// full bundle.
 func FetchRegistrants(ctx context.Context, c *Client, code string, opts RegistrantsOptions) ([]Registrant, error) {
 	eventRaw, ev, err := c.resolveEvent(ctx, code)
 	if err != nil {
@@ -307,8 +309,8 @@ func FetchRegistrants(ctx context.Context, c *Client, code string, opts Registra
 	}
 	filter := "event.id eq '" + ev.ID + "'"
 
-	var attendees, questions, orders, transactions []json.RawMessage
-	var aErr, qErr, oErr, tErr error
+	var attendees, questions, orders, orderItems, transactions []json.RawMessage
+	var aErr, qErr, oErr, iErr, tErr error
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		attendees, aErr = c.filterAll(ctx, "/attendees/filter", filter)
@@ -320,6 +322,9 @@ func FetchRegistrants(ctx context.Context, c *Client, code string, opts Registra
 	if opts.WithPayments {
 		wg.Go(func() {
 			orders, oErr = c.listAll(ctx, "/events/"+ev.ID+"/orders", nil)
+		})
+		wg.Go(func() {
+			orderItems, iErr = c.listAll(ctx, "/events/"+ev.ID+"/orders/items", nil)
 		})
 		wg.Go(func() {
 			transactions, tErr = c.listAll(ctx, "/events/"+ev.ID+"/transactions", nil)
@@ -335,6 +340,9 @@ func FetchRegistrants(ctx context.Context, c *Client, code string, opts Registra
 	if oErr != nil {
 		return nil, fmt.Errorf("orders: %w", oErr)
 	}
+	if iErr != nil {
+		return nil, fmt.Errorf("order items: %w", iErr)
+	}
 	if tErr != nil {
 		return nil, fmt.Errorf("transactions: %w", tErr)
 	}
@@ -347,6 +355,7 @@ func FetchRegistrants(ctx context.Context, c *Client, code string, opts Registra
 	LabelAnswers(regs, questions)
 	if opts.WithPayments {
 		pay := PaymentsByAttendee(orders, transactions)
+		items := OrderItemsByAttendee(orders, orderItems)
 		// Orders carry no currency; attendees without a transaction (e.g. a
 		// fully discounted order) get the event's.
 		var evCur struct {
@@ -357,6 +366,9 @@ func FetchRegistrants(ctx context.Context, c *Client, code string, opts Registra
 			p := pay[regs[i].ID]
 			if p != nil && p.Currency == "" {
 				p.Currency = evCur.Currency
+			}
+			if p != nil {
+				p.Items = items[regs[i].ID]
 			}
 			regs[i].Payment = p
 		}

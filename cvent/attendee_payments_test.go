@@ -2,6 +2,7 @@ package cvent
 
 import (
 	"encoding/json"
+	"reflect"
 	"slices"
 	"testing"
 )
@@ -69,7 +70,8 @@ func TestFetchRegistrantsWithPayments(t *testing.T) {
 	m.setEventEndpoints()
 	m.setSingle("/attendees/filter", itemsPage(regAttRef, regAttNoRef))
 	m.setSingle("/event-questions", itemsPage(regQRef))
-	m.setSingle("/events/"+testUUID+"/orders", itemsPage(`{"attendee":{"id":"a1"},"amountOrdered":10,"amountPaid":10,"amountDue":0}`))
+	m.setSingle("/events/"+testUUID+"/orders", itemsPage(`{"id":"o1","attendee":{"id":"a1"},"amountOrdered":10,"amountPaid":10,"amountDue":0}`))
+	m.setSingle("/events/"+testUUID+"/orders/items", itemsPage(`{"order":{"id":"o1"},"attendee":{"id":"a1"},"name":"Conference Registration","active":true,"amountOrdered":10,"amountPaid":10}`))
 	m.setSingle("/events/"+testUUID+"/transactions", itemsPage())
 	c := newCventClient(m.srv.URL, "cid", "secret")
 	warmToken(c)
@@ -83,5 +85,28 @@ func TestFetchRegistrantsWithPayments(t *testing.T) {
 	}
 	if rs[0].Payment.Currency != "USD" { // no transaction: the event's currency
 		t.Fatalf("currency = %q, want the event's USD", rs[0].Payment.Currency)
+	}
+	if items := rs[0].Payment.Items; len(items) != 1 || items[0].Name != "Conference Registration" {
+		t.Fatalf("items = %+v, want the conference registration", items)
+	}
+}
+
+func TestOrderItemsByAttendee(t *testing.T) {
+	orders := raws(`{"id":"o1"}`, `{"id":"o2","cancelled":true}`)
+	items := raws(
+		`{"order":{"id":"o1"},"attendee":{"id":"p1"},"product":{"type":"AdmissionItem"},"name":"Conference Registration","active":true,"quantity":1,"amountOrdered":990,"amountPaid":990,"amountDue":0}`,
+		`{"order":{"id":"o1"},"attendee":{"id":"p1"},"product":{"type":"AdmissionItem"},"name":"Companion/Guest Registration","guest":true,"active":true,"quantity":1,"amountOrdered":360.004,"amountPaid":0,"amountDue":360.004}`,
+		`{"order":{"id":"o1"},"attendee":{"id":"p1"},"name":"Dropped","active":false,"amountOrdered":5}`,
+		`{"order":{"id":"o1"},"attendee":{"id":"p1"},"name":"Deleted","deleted":true,"amountOrdered":5}`,
+		`{"order":{"id":"o2"},"attendee":{"id":"p1"},"name":"Cancelled order","amountOrdered":5}`,
+		`{"order":{"id":"o1"},"name":"No attendee"}`,
+	)
+	got := OrderItemsByAttendee(orders, items)
+	want := map[string][]OrderItem{"p1": {
+		{Name: "Conference Registration", ProductType: "AdmissionItem", Quantity: 1, Ordered: 990, Paid: 990},
+		{Name: "Companion/Guest Registration", ProductType: "AdmissionItem", ForGuest: true, Quantity: 1, Ordered: 360, Due: 360},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("OrderItemsByAttendee = %+v\nwant %+v", got, want)
 	}
 }

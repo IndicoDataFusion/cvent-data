@@ -33,6 +33,21 @@ type AttendeePayment struct {
 	// OriginalAmount is the amount before discounts (Ordered + the discount
 	// amounts); 0 when no discount applies.
 	OriginalAmount float64 `json:"originalAmount,omitempty"`
+	// Items are the order lines the attendee selected (registration,
+	// add-ons, guest fees); filled by FetchRegistrants with WithPayments.
+	Items []OrderItem `json:"items,omitempty"`
+}
+
+// OrderItem is one line of an attendee's order. A guest's registration is
+// a line on the primary attendee's order with ForGuest set.
+type OrderItem struct {
+	Name        string  `json:"name"`
+	ProductType string  `json:"productType,omitempty"` // e.g. "AdmissionItem", "Session"
+	ForGuest    bool    `json:"forGuest,omitempty"`
+	Quantity    int     `json:"quantity,omitempty"`
+	Ordered     float64 `json:"ordered"`
+	Paid        float64 `json:"paid"`
+	Due         float64 `json:"due"`
 }
 
 // AppliedDiscount is a discount on one of the attendee's orders.
@@ -143,6 +158,58 @@ func PaymentsByAttendee(orders, transactions []json.RawMessage) map[string]*Atte
 		default:
 			p.Status = PaymentUnpaid
 		}
+	}
+	return out
+}
+
+// OrderItemsByAttendee groups raw order items (/events/{id}/orders/items)
+// per attendee id, skipping inactive or deleted items and the items of
+// cancelled orders (raw /events/{id}/orders).
+func OrderItemsByAttendee(orders, orderItems []json.RawMessage) map[string][]OrderItem {
+	cancelled := map[string]bool{}
+	for _, raw := range orders {
+		var o struct {
+			ID        string `json:"id"`
+			Cancelled bool   `json:"cancelled"`
+		}
+		if json.Unmarshal(raw, &o) == nil && o.Cancelled {
+			cancelled[o.ID] = true
+		}
+	}
+	out := map[string][]OrderItem{}
+	for _, raw := range orderItems {
+		var it struct {
+			Order struct {
+				ID string `json:"id"`
+			} `json:"order"`
+			Attendee struct {
+				ID string `json:"id"`
+			} `json:"attendee"`
+			Product struct {
+				Type string `json:"type"`
+			} `json:"product"`
+			Active        *bool   `json:"active"`
+			Deleted       bool    `json:"deleted"`
+			Guest         bool    `json:"guest"`
+			Name          string  `json:"name"`
+			Quantity      int     `json:"quantity"`
+			AmountOrdered float64 `json:"amountOrdered"`
+			AmountPaid    float64 `json:"amountPaid"`
+			AmountDue     float64 `json:"amountDue"`
+		}
+		if json.Unmarshal(raw, &it) != nil || it.Attendee.ID == "" || it.Deleted ||
+			(it.Active != nil && !*it.Active) || cancelled[it.Order.ID] {
+			continue
+		}
+		out[it.Attendee.ID] = append(out[it.Attendee.ID], OrderItem{
+			Name:        it.Name,
+			ProductType: it.Product.Type,
+			ForGuest:    it.Guest,
+			Quantity:    it.Quantity,
+			Ordered:     round2(it.AmountOrdered),
+			Paid:        round2(it.AmountPaid),
+			Due:         round2(it.AmountDue),
+		})
 	}
 	return out
 }
