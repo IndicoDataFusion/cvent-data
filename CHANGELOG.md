@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- `cvent.Registrant` is the one attendee record: the attendee search
+  (`GET /api/cvent/events/{code}/attendees`) returns it as `items` (the
+  `questions` map is gone: answers carry their question text), the dump
+  writes it to `<code>/registrants.json`, and the Attendees view renders it.
+  The browser no longer joins guests and orders itself.
+- `BuildRegistrants` (one builder for every path) and
+  `RegistrantsFromBundle`; `Registrant` gains the remaining contact and
+  registration fields (prefix, CC email, work/home phone, the other
+  address, admission item, registration path, registered/cancelled dates,
+  check-in time) and `RegisteredBy` on guests. `GuestRef` is now
+  `PersonRef` and carries the confirmation number.
+- The event bundle reads each successful charge's billing address
+  (`EventBundle.BillingAddresses`), so the sheet shows it. This costs one
+  `GET /transactions/{id}` per charge on every bundle fetch.
 - Attendee sheet shows everything the registrant entered: every contact
   field (CC email, work/home phone, both addresses with line 2 and region,
   prefix, pronouns, website), a Registration block (type, admission item,

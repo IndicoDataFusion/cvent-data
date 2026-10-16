@@ -35,9 +35,11 @@ curl -s "https://api-platform.cvent.com/ea/events?limit=5" \
 go get github.com/IndicoDataFusion/cvent-data@latest
 ```
 
-The `cvent` package has no dependencies beyond the standard library. To
-read an event's attendees for matching against another system (this is
-how [IndicoDataFusion](https://github.com/IndicoDataFusion/IDF) pairs Cvent
+The `cvent` package has no dependencies beyond the standard library. Its
+attendee record is `cvent.Registrant` — the same struct the web app's
+attendee search returns and the dump writes to `registrants.json`. To read
+an event's attendees for matching against another system (this is how
+[IndicoDataFusion](https://github.com/IndicoDataFusion/IDF) pairs Cvent
 attendees with Indico registrations):
 
 ```go
@@ -52,9 +54,12 @@ for _, a := range atts {
 	// a.FullName, a.Email, a.Status, a.Ref (the Indico Ref # answer, trimmed),
 	// a.RegistrationType (the member type), a.Company, a.Title, a.MobilePhone,
 	// a.EmergencyContactName / Phone, a.VisaLetter ("Yes" | "No"),
-	// a.Address, a.InvoiceAddress() (billing address, else a.Address),
-	// a.Guests (companions; a guest has Guest + PrimaryID), a.Answers
-	// (question text + value), a.CustomFields (every contact custom field).
+	// a.Address (+ AddressType, OtherAddress), a.InvoiceAddress() (billing
+	// address, else a.Address), the other contact fields (Prefix, CCEmail,
+	// WorkPhone, …), AdmissionItem, RegisteredAt, CheckedInAt,
+	// a.Guests / a.RegisteredBy (guest links; a guest has Guest + PrimaryID),
+	// a.Answers (question text + value), a.CustomFields (every contact
+	// custom field).
 	// a.Payment (nil without an order): Status is paid | partial | unpaid |
 	// waived | cancelled, plus Ordered/Paid/Due/Refunded, Currency, Method,
 	// LastPaymentDate, Invoices, Discounts, OriginalAmount (before discounts)
@@ -65,6 +70,12 @@ for _, a := range atts {
 - `FetchRegistrants` resolves a short event code or uuid, then fetches only
   attendees and event questions (plus orders, order items and transactions
   with `WithPayments`), not the full bundle.
+- Three other ways to the same `[]Registrant`, all built by
+  `BuildRegistrants`: `RegistrantsFromBundle(bundle, "")` over a cached
+  `EventCache` bundle (payments and billing addresses included); a dump's
+  `<code>/registrants.json`; or the app's
+  `GET /api/cvent/events/{code}/attendees`, whose `items` decode straight
+  into `cvent.Registrant`.
 - The emergency contact and visa-letter answers are contact custom fields,
   not event questions; they are matched by field name
   (`EmergencyContactNamePattern`, `EmergencyContactPhonePattern`,
@@ -83,8 +94,8 @@ for _, a := range atts {
   charged (e.g. a 100% discount) → `waived`; nothing due → `paid`; some
   paid → `partial`; otherwise `unpaid`. Orders carry no currency, so it
   comes from the transactions, else the event.
-- Pure helpers for data you already hold: `RegistrantsFrom`,
-  `LabelAnswers`, `RefQuestionID`, `PaymentsByAttendee`,
+- Pure helpers for data you already hold: `BuildRegistrants`,
+  `RegistrantsFrom`, `LabelAnswers`, `RefQuestionID`, `PaymentsByAttendee`,
   `OrderItemsByAttendee`, and `BuildPayments` (the event-wide
   money view). `FromEnvironment` reads credentials from the environment or
   a `.env`; `NewEventCache(c).Bundle(ctx, code)` returns the full 13-resource
@@ -138,7 +149,8 @@ go run ./cmd/cvent-dump <CODE1> <CODE2>          # explicit codes
 `--dump <dir>` fetches each configured event **once** and writes a snapshot —
 `<dir>/index.json` plus one dir per event holding `event.json`, 13 resource
 files (attendees, orders, transactions, sessions, speakers, event questions,
-…) and
+…), `registrants.json` (the `cvent.Registrant` records the Attendees view
+reads) and
 `meta.json` — then exits (no server). It is one-shot and fatal on missing
 credentials. The server serves that dir at `/data/…`; the frontend reads it
 instead of the live API when the page URL has a `static=1` query param or
@@ -152,9 +164,10 @@ An event picker at the left of the top bar, then per-event tabs:
 **Overview** (a dashboard of collapsible Registrations, Pricing, Discounts,
 Payments and Program sections; Discounts shows each code's used / total and
 links each redemption to its attendee) and **Attendees** (search, a table, and a detail
-sheet with the full record — registration answers labelled with their
-question text (from `GET /event-questions`) and a read-only check-in
-status). The footer shows the build SHA.
+sheet with the full `cvent.Registrant` — every contact field, the
+registration, guest ↔ primary links, the order lines with payment status and
+billing address, answers labelled with their question text, and a read-only
+check-in status). The footer shows the build SHA.
 
 ### API
 
@@ -162,9 +175,9 @@ status). The footer shows the build SHA.
 |---|---|
 | `GET /api/health` | `{ok, source, build}`; always 200 |
 | `GET /api/cvent/events` | `{events, default}`: the catalog from `data/index.json` (empty if no dump) + the default code (`--event`, else `CVENT_CODE_1`) |
-| `GET /api/cvent/events/{code}` | the 13-resource bundle; 15-min server cache |
+| `GET /api/cvent/events/{code}` | the 13-resource bundle plus `billingAddresses` (attendee id → address, from the transaction details); 15-min server cache |
 | `GET /api/cvent/events/{code}/payments` | attendee→order→transaction join: `totals` (ordered/paid/due/refunded) + `orders` rows + `cancelled` |
-| `GET /api/cvent/events/{code}/attendees?q=&limit=&offset=` | case-insensitive search over name/email/confirmation; `limit` defaults 50, caps at 200. `questions` maps each answered question id → `{text, type}` |
+| `GET /api/cvent/events/{code}/attendees?q=&limit=&offset=` | case-insensitive search over name/email/confirmation; `limit` defaults 50, caps at 200. `items` are `cvent.Registrant` records |
 | `POST /api/cvent/events/{code}/repull` | background re-fetch; returns immediately (non-blocking) |
 | `GET /api/cvent/events/{code}/repull-status` | `{running, pulledAt}` |
 
