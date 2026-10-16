@@ -1099,9 +1099,13 @@ function closeSheet() {
                  question object carries ONLY an id; the search response's
                  `questions` map (from /event-questions) supplies the text
      questions   [{ id, name, type, value: [...] }] — contact custom fields
-                 (e.g. Emergency Contact), labelled inline by name
-     due amount  NOT present: the attendee object carries no order or
-                 payment data → no due column (no fabricated join)
+                 (e.g. Emergency Contact, visa letter), labelled inline by name
+     guest       a companion is an attendee of its own with guest: true and
+                 primaryId = the attendee who registered them
+     orders      NOT embedded on the attendee: the sheet joins the bundle's
+                 orders + orderItems by attendee id (registrationIndex). A
+                 guest's fee is an order item on the primary's order with
+                 guest: true, so a guest has no order of their own
      activities  NOT embedded on the attendee → no activities block
      transactions NOT embedded on the attendee → no transactions block */
 
@@ -1153,17 +1157,192 @@ function attendeeDetailSections(a, qmap) {
   ].filter(([, rows]) => rows.length);
 }
 
-// Work (or home) address flattened to a single line.
-function attendeeAddress(a) {
-  const c = (a && a.contact) || {};
-  const ad = c.workAddress || c.homeAddress || {};
-  const city = [ad.city, [ad.regionCode, ad.postalCode].filter(Boolean).join(" ")]
+// An address object flattened to a single line ("" when empty).
+function addressLine(ad) {
+  if (!ad || typeof ad !== "object") return "";
+  const city = [ad.city, [ad.region || ad.regionCode, ad.postalCode].filter(Boolean).join(" ")]
     .filter(Boolean)
     .join(", ");
-  return [ad.address1, city, ad.country || ad.countryCode].filter(Boolean).join(", ");
+  return [ad.address1, ad.address2, ad.address3, city, ad.country || ad.countryCode]
+    .filter(Boolean)
+    .join(", ");
 }
 
-function attendeeSheetHtml(a, qmap) {
+// Contact rows, as [label, value] — every contact field the registrant can
+// fill in, in form order; the caller drops the empty ones. The primary
+// address (primaryAddressType) comes first, labelled by its kind.
+function contactRows(a) {
+  const c = (a && a.contact) || {};
+  const home = /^home$/i.test(c.primaryAddressType || "");
+  const addrs = home
+    ? [["Home address", c.homeAddress], ["Work address", c.workAddress]]
+    : [["Work address", c.workAddress], ["Home address", c.homeAddress]];
+  const pronouns = Array.isArray(c.pronouns) ? c.pronouns.join(", ") : c.pronouns || c.pronoun || "";
+  return [
+    ["Prefix", c.prefix],
+    ["Nickname", c.nickname],
+    ["Designation", c.designation],
+    ["Pronouns", pronouns],
+    ["Email", attendeeEmail(a)],
+    ["CC email", c.ccEmail],
+    ["Mobile phone", c.mobilePhone],
+    ["Work phone", c.workPhone],
+    ["Home phone", c.homePhone],
+    ["Title", c.title],
+    ["Company", c.company],
+    ...addrs.map(([k, ad]) => [k, addressLine(ad)]),
+    ["Website", c.personalWebsite],
+    ["Contact type", c.type && typeof c.type === "object" ? c.type.name : ""],
+  ].filter(([, v]) => typeof v === "string" && v.trim());
+}
+
+// Registration rows, as [label, value]: what the registrant picked and
+// when (status and type are also header badges).
+function registrationRows(a) {
+  const nm = (x) => (x && typeof x === "object" ? x.name || x.code || "" : "");
+  return [
+    ["Registration type", attendeeTicket(a)],
+    ["Admission item", nm(a.admissionItem)],
+    ["Registration path", nm(a.registrationPath)],
+    ["Registered", a.registeredAt ? fmtDate(a.registeredAt) : ""],
+    ["Cancelled", a.registrationCancelledAt ? fmtDate(a.registrationCancelledAt) : ""],
+    ["Note", a.note],
+  ].filter(([, v]) => typeof v === "string" && v.trim());
+}
+
+/* ---------- the registration index: guests and orders per attendee ----------
+   Joined client-side from the event bundle (live: /api/cvent/events/<code>,
+   static: the dump files), so both modes share one path. Order items are
+   attributed to the attendee who placed the order; a guest's fee is one of
+   the primary's items with guest: true. Cancelled orders, and inactive or
+   deleted items, are skipped (the cvent package's OrderItemsByAttendee
+   rules). */
+function registrationIndex(bundle) {
+  const list = (v) => (Array.isArray(v) ? v.filter((x) => x && typeof x === "object") : []);
+  const push = (m, k, v) => (m.has(k) ? m.get(k).push(v) : m.set(k, [v]));
+  const byId = new Map();
+  const guestsOf = new Map(); // primary attendee id → guest attendees
+  for (const a of list(bundle && bundle.attendees)) {
+    if (a.id) byId.set(a.id, a);
+    if (a.guest && a.primaryId) push(guestsOf, a.primaryId, a);
+  }
+  const cancelled = new Set();
+  const ordersOf = new Map(); // attendee id → non-cancelled orders
+  for (const o of list(bundle && bundle.orders)) {
+    if (o.cancelled) {
+      cancelled.add(o.id);
+      continue;
+    }
+    const id = o.attendee && o.attendee.id;
+    if (id) push(ordersOf, id, o);
+  }
+  const itemsOf = new Map(); // attendee id → active order items
+  for (const it of list(bundle && bundle.orderItems)) {
+    const id = it.attendee && it.attendee.id;
+    if (!id || it.deleted || it.active === false || cancelled.has(it.order && it.order.id)) continue;
+    push(itemsOf, id, it);
+  }
+  const fee = list(bundle && bundle.feeItems);
+  const currency =
+    (fee[0] && fee[0].currency) || (bundle && bundle.event && bundle.event.currency) || "";
+  // question id → {text, type} over every attendee, for sheets opened
+  // from a guest / primary link (not on the current search page).
+  const questionText = answeredQuestions(bundle && bundle.eventQuestions, [...byId.values()]);
+  return { byId, guestsOf, ordersOf, itemsOf, currency, questionText };
+}
+
+// The money position over an attendee's non-cancelled orders.
+function orderTotals(orders) {
+  const sum = (k) => Math.round(orders.reduce((n, o) => n + (Number(o[k]) || 0), 0) * 100) / 100;
+  const pick = (k) => [...new Set(orders.map((o) => o[k]).filter(Boolean))];
+  return {
+    ordered: sum("amountOrdered"),
+    paid: sum("amountPaid"),
+    due: sum("amountDue"),
+    invoices: pick("invoiceNumber"),
+    methods: pick("paymentMethod"),
+    discounts: [...new Set(orders.flatMap((o) =>
+      (Array.isArray(o.discounts) ? o.discounts : []).map((d) => d && (d.code || d.name)).filter(Boolean)))],
+  };
+}
+
+// Paid / Partial / Unpaid as on the dashboard, plus No charge when nothing
+// was ordered (e.g. a 100% discount or a free registration).
+function totalsBadge(t) {
+  if (t.ordered <= 0 && t.paid <= 0) return '<span class="badge badge-slate">No charge</span>';
+  return orderStatusBadge({ amountOrdered: t.ordered, amountPaid: t.paid, amountDue: t.due });
+}
+
+// A person in the sheet that opens their own sheet (data-open-att).
+function personButton(p) {
+  const nm = attendeeName(p) || "Attendee";
+  const email = attendeeEmail(p);
+  return (
+    '<button class="person-link" type="button" data-open-att="' + esc(p.id) + '">' +
+    esc(nm) + "</button>" +
+    (email ? ' <span class="muted-line person-sub">' + esc(email) + "</span>" : "")
+  );
+}
+
+// Guest / primary and order sections for the sheet ("" without an index).
+function relatedSectionsHtml(a, idx) {
+  if (!idx || !a) return "";
+  let out = "";
+  if (a.guest) {
+    const p = a.primaryId && idx.byId.get(a.primaryId);
+    out += '<div class="sheet-sec">Registered by</div>';
+    out += p
+      ? '<div class="person-row">' + personButton(p) + "</div>" +
+        '<div class="muted-line">The guest fee is on ' + esc(attendeeName(p) || "their") +
+        "&#39;s order.</div>"
+      : '<div class="muted-line">The primary attendee (' + esc(a.primaryId || "unknown") +
+        ") is not in this event&#39;s attendee list.</div>";
+  }
+  const guests = idx.guestsOf.get(a.id) || [];
+  if (guests.length) {
+    out += '<div class="sheet-sec">Guests (' + esc(guests.length) + ")</div>";
+    for (const g of guests) out += '<div class="person-row">' + personButton(g) + "</div>";
+  }
+  const items = idx.itemsOf.get(a.id) || [];
+  const orders = idx.ordersOf.get(a.id) || [];
+  if (items.length || orders.length) {
+    const cur = idx.currency;
+    const t = orderTotals(orders);
+    const rows = items
+      .map((it) =>
+        "<tr><td>" + esc(it.name || "Item") +
+        (it.guest ? ' <span class="badge badge-slate">Guest</span>' : "") +
+        (Number(it.quantity) > 1 ? ' <span class="muted-line">× ' + esc(it.quantity) + "</span>" : "") +
+        '</td><td class="num">' + esc(money(it.amountOrdered, cur)) + "</td></tr>")
+      .join("");
+    out +=
+      '<div class="sheet-sec">Order ' + totalsBadge(t) + "</div>" +
+      (rows
+        ? '<table class="tbl"><thead><tr><th>Item</th><th class="num">Amount</th></tr></thead><tbody>' +
+          rows + "</tbody></table>"
+        : "") +
+      '<table class="tbl"><tbody>' +
+      '<tr><td>Ordered</td><td class="num">' + esc(money(t.ordered, cur)) + "</td></tr>" +
+      '<tr><td>Paid</td><td class="num">' + esc(money(t.paid, cur)) + "</td></tr>" +
+      '<tr><td>Due</td><td class="num">' + esc(money(t.due, cur)) + "</td></tr>" +
+      "</tbody></table>";
+    const meta = [
+      ["Invoice", t.invoices.join(", ")],
+      ["Payment method", t.methods.join(", ")],
+      ["Discount", t.discounts.join(", ")],
+    ].filter(([, v]) => v);
+    if (meta.length) {
+      out += '<dl class="kv-list sheet-order-meta">';
+      for (const [k, v] of meta) out += "<dt>" + esc(k) + "</dt><dd>" + esc(v) + "</dd>";
+      out += "</dl>";
+    }
+  }
+  return out;
+}
+
+// idx: the registrationIndex, or null while the bundle is still loading
+// (the guest and order sections are then left out; see openSheet).
+function attendeeSheetHtml(a, qmap, idx) {
   const name = attendeeName(a);
   const c = (a && a.contact) || {};
   const conf = a.confirmationNumber || "";
@@ -1174,6 +1353,7 @@ function attendeeSheetHtml(a, qmap) {
   const status = a.status || "";
   const headBadges =
     (STATIC ? '<span class="badge badge-slate">Snapshot</span>' : "") +
+    (a.guest ? '<span class="badge badge-amber">Guest</span>' : "") +
     (ticket ? '<span class="badge badge-slate">' + esc(ticket) + "</span>" : "") +
     (status ? '<span class="badge badge-slate">' + esc(status) + "</span>" : "") +
     (checked
@@ -1197,19 +1377,16 @@ function attendeeSheetHtml(a, qmap) {
         "</div>"
       : "") +
     '<div class="badge-row">' + headBadges + "</div>";
-  // Contact block: only fields that are actually present in the payload.
-  const contactRows = [
-    ["Email", attendeeEmail(a)],
-    ["Phone", c.mobilePhone || ""],
-    ["Address", attendeeAddress(a)],
-  ].filter(([, v]) => v);
-  if (contactRows.length) {
-    inner += '<div class="sheet-sec">Contact</div><dl class="kv-list">';
-    for (const [k, v] of contactRows) {
+  // Contact and registration blocks: only fields present in the payload.
+  for (const [sec, rows] of [["Contact", contactRows(a)], ["Registration", registrationRows(a)]]) {
+    if (!rows.length) continue;
+    inner += '<div class="sheet-sec">' + esc(sec) + '</div><dl class="kv-list">';
+    for (const [k, v] of rows) {
       inner += "<dt>" + esc(k) + "</dt><dd>" + esc(v) + "</dd>";
     }
     inner += "</dl>";
   }
+  inner += relatedSectionsHtml(a, idx);
   for (const [title, rows] of attendeeDetailSections(a, qmap)) {
     inner += '<div class="sheet-sec">' + esc(title) + '</div><dl class="kv-list">';
     for (const r of rows) {
@@ -1310,6 +1487,12 @@ export function attendees(mount, code, params) {
     items: [], questions: {}, result: null, loading: false,
   };
   let openId = (params && params.get("open")) || "";
+  // Guests and orders for the sheet, from the event bundle; null until it
+  // loads, or when it fails (the sheet then shows the attendee alone).
+  let idx = null;
+  const idxReady = getEvent(code)
+    .then((b) => (idx = registrationIndex(b)))
+    .catch(() => null);
 
   // The one search listener, re-attached after every re-render (mount
   // innerHTML replacement drops it). 300 ms debounce per the view spec. The
@@ -1441,11 +1624,20 @@ export function attendees(mount, code, params) {
     closeSheet(); // one sheet at a time
     const wrap = document.createElement("div");
     wrap.className = "bottom-sheet";
+    const panelHtml = () =>
+      '<span class="sheet-handle" data-sheet-close></span>' +
+      attendeeSheetHtml(a, idx ? Object.assign({}, idx.questionText, state.questions) : state.questions, idx);
     wrap.innerHTML =
       '<div class="sheet-backdrop" data-sheet-close></div>' +
-      '<div class="sheet-panel"><span class="sheet-handle" data-sheet-close></span>' +
-      attendeeSheetHtml(a, state.questions) +
-      "</div>";
+      '<div class="sheet-panel">' + panelHtml() + "</div>";
+    if (!idx) {
+      // Bundle still loading: fill in the guest and order sections once it
+      // lands, if this sheet is still the open one.
+      idxReady.then(() => {
+        const panel = wrap.querySelector(".sheet-panel");
+        if (idx && sheetEl === wrap && isCurrent() && panel) panel.innerHTML = panelHtml();
+      });
+    }
     (document.body || document).appendChild(wrap);
     document.body.style.overflow = "hidden"; // body scroll lock (house-style)
     // Delegation on the wrapper: the backdrop, handle and close button all
@@ -1453,7 +1645,15 @@ export function attendees(mount, code, params) {
     wrap.addEventListener("click", (e) => {
       const t = e && e.target;
       if (!t || !t.closest) return;
-      if (t.closest("[data-sheet-close]")) closeSheet();
+      if (t.closest("[data-sheet-close]")) {
+        closeSheet();
+        return;
+      }
+      // A guest / primary link: open that attendee's sheet. They need not
+      // be in the current search page, so they come from the bundle.
+      const link = t.closest("[data-open-att]");
+      const other = link && idx && idx.byId.get(link.getAttribute("data-open-att"));
+      if (other) openSheet(other);
     });
     sheetEl = wrap;
   }

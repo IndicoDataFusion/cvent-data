@@ -812,3 +812,20 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
 
 /* ================= fallback loading note (theme.js) ================= */
 .loading-note { color: var(--muted); font-size: 14px; padding: 40px 0; text-align: center; }
+
+/* attendee sheet: guest / primary links and the order block */
+.person-row { margin: 0 0 6px; font-size: 14px; }
+.person-link {
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.person-link:hover, .person-link:focus-visible { text-decoration: underline; }
+.person-row .person-sub { display: inline; }
+.sheet-sec .badge { margin-left: 6px; vertical-align: middle; }
+.sheet-order-meta { margin-top: 10px; }

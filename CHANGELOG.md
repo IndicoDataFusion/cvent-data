@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Attendee sheet shows everything the registrant entered: every contact
+  field (CC email, work/home phone, both addresses with line 2 and region,
+  prefix, pronouns, website), a Registration block (type, admission item,
+  path, registered date, note), and the order: each selected item (guest
+  fees marked), ordered/paid/due, invoice, payment method and discount.
+- Guests and their primary are linked: a guest's sheet shows Registered by
+  (and that the fee is on the primary's order), the primary's lists their
+  Guests, and each name opens that person's sheet. The join runs in the
+  browser over the event bundle, so live and static mode match.
 - `Registrant` carries the full registration form: `Title`, `MobilePhone`,
   `EmergencyContactName` / `EmergencyContactPhone` and `VisaLetter` (from
   contact custom fields), `Address`, `CustomFields`, and `Answers` with
