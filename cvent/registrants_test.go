@@ -3,6 +3,7 @@ package cvent
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -26,8 +27,22 @@ const (
 		"registrationType":{"name":"Member"},
 		"answers":[{"question":{"id":"q-other"},"value":["x"]},{"question":{"id":"q-ref"},"value":[" 16 "]}]}`
 	regAttNoRef = `{"id":"a2","status":"Cancelled","contact":{"firstName":"Grace","middleName":"B.","lastName":"Hopper"}}`
-	regQRef     = `{"id":"q-ref","text":"Please enter your Indico registration reference number (Ref #). If you …"}`
-	regQOther   = `{"id":"q-other","text":"First time attending"}`
+	// A full registration form: contact details, custom fields (repeated
+	// under attendee.questions, as Cvent does) and one guest.
+	regAttFull = `{"id":"p1","status":"Accepted","registrationType":{"name":"IEEE NPSS Member"},
+		"contact":{"firstName":"Ada","lastName":"Lovelace","email":"ada@example.com","company":"AE",
+			"title":" Engineer ","mobilePhone":"+1 555 0100","primaryAddressType":"Work",
+			"workAddress":{"address1":"1 Main St","city":"Lansing","region":"Michigan","postalCode":"48824","country":"United States","countryCode":"US"},
+			"customFields":[
+				{"name":"Emergency Contact","value":["Charles Babbage"]},
+				{"name":"Emergency Contact #","value":["+1 555 0199"]},
+				{"name":"Do you require a visa letter?","value":["Yes"]}]},
+		"questions":[{"name":"Emergency Contact","value":["Charles Babbage"]}],
+		"answers":[{"question":{"id":"q-other"},"value":["Yes"]},{"question":{"id":"q-diet"},"value":["Vegan","Nut allergy"]},{"question":{"id":"q-blank"},"value":[]}]}`
+	regAttGuest = `{"id":"g1","status":"Accepted","guest":true,"primaryId":"p1","registrationType":{"name":"Companion/Guest"},
+		"contact":{"firstName":"Byron","lastName":"Lovelace"}}`
+	regQRef   = `{"id":"q-ref","text":"Please enter your Indico registration reference number (Ref #). If you …"}`
+	regQOther = `{"id":"q-other","text":"First time attending"}`
 )
 
 func TestRefQuestionID(t *testing.T) {
@@ -47,8 +62,9 @@ func TestRegistrantsFrom(t *testing.T) {
 	}
 	want := Registrant{ID: "a1", FirstName: "Ada", LastName: "Lovelace", FullName: "Ada Lovelace",
 		Email: "ada@example.com", Company: "AE", Ref: "16", Status: "Accepted",
-		RegistrationType: "Member", ConfirmationNumber: "C1", CheckedIn: true}
-	if rs[0] != want {
+		RegistrationType: "Member", ConfirmationNumber: "C1", CheckedIn: true,
+		Answers: []Answer{{QuestionID: "q-other", Value: "x"}, {QuestionID: "q-ref", Value: "16"}}}
+	if !reflect.DeepEqual(rs[0], want) {
 		t.Fatalf("registrant[0] = %+v\nwant %+v", rs[0], want)
 	}
 	if rs[1].FullName != "Grace B. Hopper" || rs[1].Ref != "" || rs[1].Status != "Cancelled" {
@@ -57,6 +73,41 @@ func TestRegistrantsFrom(t *testing.T) {
 	// No ref question: Ref stays empty.
 	if rs := RegistrantsFrom([]json.RawMessage{json.RawMessage(regAttRef)}, ""); rs[0].Ref != "" {
 		t.Fatalf("Ref without a ref question = %q, want empty", rs[0].Ref)
+	}
+}
+
+func TestRegistrantsFromForm(t *testing.T) {
+	rs := RegistrantsFrom(raws(regAttFull, regAttGuest, regAttNoRef), "")
+	p, g := rs[0], rs[1]
+	if p.Title != "Engineer" || p.MobilePhone != "+1 555 0100" || p.RegistrationType != "IEEE NPSS Member" {
+		t.Errorf("contact = %+v", p)
+	}
+	if p.EmergencyContactName != "Charles Babbage" || p.EmergencyContactPhone != "+1 555 0199" || p.VisaLetter != "Yes" {
+		t.Errorf("custom fields: emergency=%q/%q visa=%q", p.EmergencyContactName, p.EmergencyContactPhone, p.VisaLetter)
+	}
+	if len(p.CustomFields) != 3 {
+		t.Errorf("CustomFields = %v, want 3 (questions duplicate dropped)", p.CustomFields)
+	}
+	if got := p.Address.String(); got != "1 Main St, Lansing, Michigan, 48824, United States" {
+		t.Errorf("Address = %q", got)
+	}
+	wantAns := []Answer{{QuestionID: "q-other", Value: "Yes"}, {QuestionID: "q-diet", Value: "Vegan; Nut allergy"}}
+	if !reflect.DeepEqual(p.Answers, wantAns) {
+		t.Errorf("Answers = %+v, want %+v (blank answer dropped)", p.Answers, wantAns)
+	}
+	if !g.Guest || g.PrimaryID != "p1" || g.Address != nil || g.CustomFields != nil {
+		t.Errorf("guest = %+v", g)
+	}
+	if want := []GuestRef{{ID: "g1", FullName: "Byron Lovelace"}}; !reflect.DeepEqual(p.Guests, want) {
+		t.Errorf("Guests = %+v, want %+v", p.Guests, want)
+	}
+	if rs[2].Guests != nil || rs[2].Address != nil {
+		t.Errorf("registrant without guests/address = %+v", rs[2])
+	}
+
+	LabelAnswers(rs, raws(regQOther))
+	if p.Answers[0].Question != "First time attending" || p.Answers[1].Question != "" {
+		t.Errorf("labelled answers = %+v", p.Answers)
 	}
 }
 
@@ -80,13 +131,16 @@ func TestFetchRegistrants(t *testing.T) {
 		t.Fatalf("orders fetched %d times, want 0", n)
 	}
 
-	// A pinned question id skips the questions fetch.
-	before := m.count("/event-questions")
+	if rs[0].Answers[1].Question == "" {
+		t.Fatalf("answers not labelled: %+v", rs[0].Answers)
+	}
+
+	// A pinned question id overrides the auto-detected one.
 	rs, err = FetchRegistrants(context.Background(), c, testCode, RegistrantsOptions{RefQuestionID: "q-other"})
 	if err != nil {
 		t.Fatalf("FetchRegistrants (pinned): %v", err)
 	}
-	if rs[0].Ref != "x" || m.count("/event-questions") != before {
-		t.Fatalf("pinned: Ref=%q, questions fetched again=%v", rs[0].Ref, m.count("/event-questions") != before)
+	if rs[0].Ref != "x" {
+		t.Fatalf("pinned: Ref=%q, want x", rs[0].Ref)
 	}
 }
