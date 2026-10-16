@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"sync"
 	"time"
 )
@@ -44,6 +45,12 @@ type EventBundle struct {
 	// EventQuestions resolves attendees[].answers[].question.id to the
 	// question text/type (raw, including Cvent's SL_* system fields).
 	EventQuestions json.RawMessage `json:"eventQuestions,omitempty"`
+
+	// BillingAddresses maps attendee id → the billing address of their
+	// latest card payment (Client.BillingAddresses), read after the
+	// fan-out from the transaction details. A failure is recorded in Errors
+	// under "billingAddresses".
+	BillingAddresses map[string]*Address `json:"billingAddresses,omitempty"`
 
 	// Errors maps resource name → error string for resources that failed to
 	// fetch. Never fatal: the bundle is returned as long as the event
@@ -240,6 +247,13 @@ func (ec *EventCache) stamped(b *EventBundle) *EventBundle {
 			cp.Errors[k] = v
 		}
 	}
+	if b.BillingAddresses != nil {
+		cp.BillingAddresses = make(map[string]*Address, len(b.BillingAddresses))
+		for k, v := range b.BillingAddresses {
+			a := *v
+			cp.BillingAddresses[k] = &a
+		}
+	}
 	return &cp
 }
 
@@ -407,6 +421,22 @@ func (ec *EventCache) fetchEvent(ctx context.Context, code string) (*EventBundle
 			set[spec.name](raw)
 		}
 		b.Counts[spec.name] = len(results[i])
+	}
+
+	// Billing addresses are only on the transaction details, so they need
+	// the transaction list first: one GET per successful charge.
+	if txns := results[slices.IndexFunc(specs, func(s resSpec) bool { return s.name == "transactions" })]; len(txns) > 0 {
+		bctx, bcancel := context.WithTimeout(ctx, fanoutTimeout)
+		defer bcancel()
+		addrs, err := ec.c.BillingAddresses(bctx, txns)
+		if err != nil {
+			if b.Errors == nil {
+				b.Errors = map[string]string{}
+			}
+			b.Errors["billingAddresses"] = err.Error()
+		} else if len(addrs) > 0 {
+			b.BillingAddresses = addrs
+		}
 	}
 	return b, nil
 }

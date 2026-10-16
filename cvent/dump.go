@@ -143,7 +143,8 @@ func RunDump(creds Credentials, eventID, dir string) (string, error) {
 }
 
 // WriteDump writes the snapshot: <dir>/<code>/{event,meta}.json plus one file
-// per resource, and <dir>/index.json. Parent dirs are created and existing
+// per resource, registrants.json (RegistrantsFromBundle), and
+// <dir>/index.json. Parent dirs are created and existing
 // files are overwritten, so a re-dump is a plain replacement.
 func WriteDump(dir string, b *EventBundle) error {
 	codeDir := filepath.Join(dir, b.Code)
@@ -179,6 +180,20 @@ func WriteDump(dir string, b *EventBundle) error {
 		if err := write(r.file, data); err != nil {
 			return err
 		}
+	}
+
+	// registrants.json: the Registrants built from this bundle (the record
+	// the static-mode attendee views read), billing addresses included.
+	regs := RegistrantsFromBundle(b, "")
+	if regs == nil {
+		regs = []Registrant{}
+	}
+	regsJSON, err := json.Marshal(regs)
+	if err != nil {
+		return fmt.Errorf("marshal registrants.json: %v", err)
+	}
+	if err := write("registrants.json", append(regsJSON, '\n')); err != nil {
+		return err
 	}
 
 	meta := DumpMeta{Code: b.Code, PulledAt: b.PulledAt, Counts: b.Counts}
