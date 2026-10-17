@@ -94,9 +94,15 @@ for _, a := range atts {
   charged (e.g. a 100% discount) → `waived`; nothing due → `paid`; some
   paid → `partial`; otherwise `unpaid`. Orders carry no currency, so it
   comes from the transactions, else the event.
+- `FetchDiscounts(ctx, c, code)` returns the event's discount codes as
+  `[]Discount` with one paged `GET /events/{id}/discounts`: code, name,
+  `Method` (`BY_PERCENTAGE`, `BY_AMOUNT`, `FLAT_PRICE`) and `Value`, active
+  flag, validity dates, and the redemption count `CapacityUsed` of
+  `CapacityTotal` (-1 = unlimited; see `Unlimited()` and `Remaining()`).
+  Orders name the codes they used in `AttendeePayment.Discounts[].Code`.
 - Pure helpers for data you already hold: `BuildRegistrants`,
   `RegistrantsFrom`, `LabelAnswers`, `RefQuestionID`, `PaymentsByAttendee`,
-  `OrderItemsByAttendee`, and `BuildPayments` (the event-wide
+  `OrderItemsByAttendee`, `DiscountsFrom`, and `BuildPayments` (the event-wide
   money view). `FromEnvironment` reads credentials from the environment or
   a `.env`; `NewEventCache(c).Bundle(ctx, code)` returns the full 13-resource
   bundle.
