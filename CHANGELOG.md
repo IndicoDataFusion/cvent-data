@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## v0.2.1 — 2026-10-17
+
+- `FetchDiscounts` and `DiscountsFrom`: the event's discount codes as typed
+  `Discount` values (code, name, method and value, active flag, validity
+  dates, level and audience, and the redemption count `CapacityUsed` of
+  `CapacityTotal`, -1 = unlimited) from one `GET /events/{id}/discounts`,
+  without the full event bundle.
+
+## v0.2.0 — 2026-10-15
 
 - `cvent.Registrant` is the one attendee record: the attendee search
   (`GET /api/cvent/events/{code}/attendees`) returns it as `items` (the
