@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log"
@@ -19,6 +20,7 @@ import (
 //	GET  /api/cvent/events/<code>                bundle
 //	GET  /api/cvent/events/<code>/payments
 //	GET  /api/cvent/events/<code>/attendees?q=&limit=&offset=
+//	GET  /api/cvent/events/<code>/attendees.csv?q=   CSV download
 //	POST /api/cvent/events/<code>/checkin
 //	POST /api/cvent/events/<code>/repull
 //	GET  /api/cvent/events/<code>/repull-status
@@ -67,6 +69,8 @@ func (h *cventHandlers) route(w http.ResponseWriter, r *http.Request) {
 		h.handlePayments(w, r, code)
 	case "attendees":
 		h.handleAttendees(w, r, code)
+	case "attendees.csv":
+		h.handleAttendeesCSV(w, r, code)
 	case "checkin":
 		h.handleCheckin(w, r, code)
 	case "repull":
@@ -246,6 +250,47 @@ func (h *cventHandlers) handleAttendees(w http.ResponseWriter, r *http.Request, 
 		"limit":  limit,
 		"items":  items,
 	})
+}
+
+// handleAttendeesCSV downloads every registrant matching q (same filter as
+// handleAttendees, no paging) as CSV (cvent.WriteRegistrantsCSV), named
+// <code>-attendees.csv.
+func (h *cventHandlers) handleAttendeesCSV(w http.ResponseWriter, r *http.Request, code string) {
+	b, err := h.cache.Bundle(r.Context(), code)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	matched := []cvent.Registrant{}
+	for _, reg := range cvent.RegistrantsFromBundle(b, "") {
+		if q == "" || registrantMatches(&reg, q) {
+			matched = append(matched, reg)
+		}
+	}
+	var buf bytes.Buffer
+	if err := cvent.WriteRegistrantsCSV(&buf, matched); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+csvFileName(b.Code)+`-attendees.csv"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(buf.Bytes())
+}
+
+// csvFileName keeps only filename-safe characters of an event code.
+func csvFileName(code string) string {
+	safe := strings.Map(func(c rune) rune {
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' {
+			return c
+		}
+		return -1
+	}, code)
+	if safe == "" {
+		return "event"
+	}
+	return safe
 }
 
 // registrantMatches reports whether q (lowercased) occurs in the

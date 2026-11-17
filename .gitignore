@@ -4,10 +4,13 @@
 __pycache__/
 *.pyc
 data/
+# CSV exports (cmd/cvent-csv): attendee personal data
+exports/
 *.json.bak
 # build artifacts
 server/server
 /data-server
+/dist/
 # live pulls (tests/pull_event.sh) and the Cvent-owned OpenAPI spec
 tests/pulls/
 *.swp

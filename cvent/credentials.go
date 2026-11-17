@@ -113,6 +113,14 @@ func EventCodesFrom(start string) []string {
 	return codes
 }
 
+// Getenv returns key from the real environment, else from the repo-root
+// .env (the same lookup as the credentials), for settings that sit next to
+// them, such as a Google Sheets key file. "" when set in neither.
+func Getenv(key string) string {
+	vals, _ := dotEnvFrom("")
+	return envOr(key, vals)
+}
+
 // envOr returns the real environment value when set and non-empty, else the
 // .env-file value.
 func envOr(key string, file map[string]string) string {

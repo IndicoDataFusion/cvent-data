@@ -6,6 +6,9 @@ a PWA for browsing event data. Go module `github.com/IndicoDataFusion/cvent-data
 - `cvent/` — Go package (stdlib only): credentials, API client, event
   bundle cache, payments join, snapshot dumps.
 - `cmd/cvent-dump/` — standalone CLI that writes event snapshots.
+- `cmd/cvent-sheets-export/` — CLI that exports registrants to CSV and Google
+  Sheets (`internal/gsheets`); each release attaches its binaries (see
+  below).
 - `server/` + `web/` — the Cvent Data PWA (see below).
 - `openapi.json` (gitignored; fetch with `make openapi`) — the official
   OpenAPI 3.0.2 spec (367 endpoints) from the Cvent developer portal. Use it
@@ -109,6 +112,44 @@ for _, a := range atts {
 
 ---
 
+## Export registrants to CSV and Google Sheets
+
+`cvent-sheets-export` fetches events' registrants live from Cvent (payments
+and billing addresses included). It writes one `<dir>/<code>.csv` per event
+and, optionally, replaces a Google Sheet tab with the same rows. In the
+sheet, the header row is frozen and values are written as plain text. The
+columns are those of `cvent.RegistrantsTable`.
+
+```bash
+go run ./cmd/cvent-sheets-export --dir exports                 # every CVENT_CODE_<n>
+go run ./cmd/cvent-sheets-export --match '<title word>'        # events whose title matches
+go run ./cmd/cvent-sheets-export <CODE> --dir "" \
+  --sheet-id <spreadsheet id> --sheet-tab Registrants          # sheet only, no CSV
+```
+
+- `--sheet-id-env <VAR>` reads the spreadsheet id from the environment or
+  `.env`.
+- Without `--sheet-tab`, each event goes to a tab named after its code.
+- `-h` lists every flag.
+
+**Google setup (once):**
+
+1. In a Google Cloud project, enable the **Google Sheets API**.
+2. Create a **service account** and add a **JSON key**. Point
+   `GOOGLE_SHEETS_KEY_FILE` at it, kept outside the repo and
+   `chmod 600`. In CI, put the key's JSON in `GOOGLE_SHEETS_KEY_JSON`.
+3. **Share** the spreadsheet with the key's `client_email` as **Editor**.
+
+The output holds attendee personal and payment data. Share sheets with
+named people only, never "anyone with the link".
+
+**Release binaries:** pushing a `v*` tag runs
+`.github/workflows/release.yml`. It tests, runs `make dist` (static
+`cvent-sheets-export_<os>_<arch>` binaries for Linux and macOS, plus
+`SHA256SUMS`) and attaches them to that tag's GitHub release. Pin a release
+and verify the checksum to run the exporter elsewhere, for example from a
+scheduled workflow, without building it.
+
 ## Cvent Data PWA
 
 A PWA built on top of the API above: a Go server (stdlib only)
@@ -156,7 +197,7 @@ go run ./cmd/cvent-dump <CODE1> <CODE2>          # explicit codes
 `<dir>/index.json` plus one dir per event holding `event.json`, 13 resource
 files (attendees, orders, transactions, sessions, speakers, event questions,
 …), `registrants.json` (the `cvent.Registrant` records the Attendees view
-reads) and
+reads), `registrants.csv` (the same records as a spreadsheet) and
 `meta.json` — then exits (no server). It is one-shot and fatal on missing
 credentials. The server serves that dir at `/data/…`; the frontend reads it
 instead of the live API when the page URL has a `static=1` query param or
@@ -184,6 +225,7 @@ check-in status). The footer shows the build SHA.
 | `GET /api/cvent/events/{code}` | the 13-resource bundle plus `billingAddresses` (attendee id → address, from the transaction details); 15-min server cache |
 | `GET /api/cvent/events/{code}/payments` | attendee→order→transaction join: `totals` (ordered/paid/due/refunded) + `orders` rows + `cancelled` |
 | `GET /api/cvent/events/{code}/attendees?q=&limit=&offset=` | case-insensitive search over name/email/confirmation; `limit` defaults 50, caps at 200. `items` are `cvent.Registrant` records |
+| `GET /api/cvent/events/{code}/attendees.csv?q=` | every match (no paging) as a CSV download (`cvent.WriteRegistrantsCSV`): one row per registrant, payment summary, plus a `Q: …` column per event question and a `Field: …` column per contact custom field. The Attendees view links it as **Export CSV** |
 | `POST /api/cvent/events/{code}/repull` | background re-fetch; returns immediately (non-blocking) |
 | `GET /api/cvent/events/{code}/repull-status` | `{running, pulledAt}` |
 

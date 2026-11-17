@@ -767,7 +767,10 @@ html[data-theme="light"] .badge-amber, html:not([data-theme="dark"]) .badge-ambe
 }
 .search-input:focus { outline: none; border-color: var(--accent); }
 .search-input::placeholder { color: var(--dim); }
-.att-count-line { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+.att-count-line { color: var(--muted); font-size: 12px; margin-bottom: 10px;
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.att-export { color: var(--accent); font-weight: 600; text-decoration: none; }
+.att-export:hover, .att-export:focus-visible { text-decoration: underline; }
 .tbl .muted-cell { color: var(--muted); overflow-wrap: anywhere; }
 .tbl .mono-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* sheet header: title block left, close button right */

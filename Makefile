@@ -20,7 +20,21 @@ dump: build
 serve: build $(DATA)/index.json
 	$(OUT) --addr $(ADDR) --web web --data $(DATA)
 
-.PHONY: build dump serve openapi
+# Release binaries of the exporter (cmd/cvent-sheets-export), static, one
+# per platform, plus SHA256SUMS, in dist/. VERSION is the tag being
+# released; .github/workflows/release.yml attaches them to the release.
+VERSION ?= $(shell git describe --tags --always --dirty)
+DIST_PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+dist:
+	rm -rf dist && mkdir -p dist
+	for p in $(DIST_PLATFORMS); do \
+	  CGO_ENABLED=0 GOOS=$${p%/*} GOARCH=$${p#*/} go build -trimpath \
+	    -ldflags "-s -w -X main.version=$(VERSION)" \
+	    -o dist/cvent-sheets-export_$${p%/*}_$${p#*/} ./cmd/cvent-sheets-export || exit 1; \
+	done
+	cd dist && sha256sum cvent-sheets-export_* > SHA256SUMS
+
+.PHONY: build dump serve openapi dist
 
 # Fetch the official Cvent OpenAPI spec (unauthenticated; gitignored).
 openapi:

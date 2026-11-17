@@ -1,6 +1,7 @@
 package cvent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -143,7 +144,8 @@ func RunDump(creds Credentials, eventID, dir string) (string, error) {
 }
 
 // WriteDump writes the snapshot: <dir>/<code>/{event,meta}.json plus one file
-// per resource, registrants.json (RegistrantsFromBundle), and
+// per resource, registrants.json (RegistrantsFromBundle), registrants.csv
+// (the same records, WriteRegistrantsCSV), and
 // <dir>/index.json. Parent dirs are created and existing
 // files are overwritten, so a re-dump is a plain replacement.
 func WriteDump(dir string, b *EventBundle) error {
@@ -193,6 +195,13 @@ func WriteDump(dir string, b *EventBundle) error {
 		return fmt.Errorf("marshal registrants.json: %v", err)
 	}
 	if err := write("registrants.json", append(regsJSON, '\n')); err != nil {
+		return err
+	}
+	var regsCSV bytes.Buffer
+	if err := WriteRegistrantsCSV(&regsCSV, regs); err != nil {
+		return fmt.Errorf("build registrants.csv: %v", err)
+	}
+	if err := write("registrants.csv", regsCSV.Bytes()); err != nil {
 		return err
 	}
 

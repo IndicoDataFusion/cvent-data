@@ -416,3 +416,40 @@ func TestRouteNotFound(t *testing.T) {
 		t.Fatalf("body = %s, want 'not found'", rec.Body)
 	}
 }
+
+// TestAttendeesCSV: attendees.csv downloads every match (no paging) as an
+// attachment named after the event code.
+func TestAttendeesCSV(t *testing.T) {
+	client := cvent.New("http://127.0.0.1:0", "c", "s")
+	ec := cvent.NewEventCache(client)
+	h := newCventHandlers("TESTCODE01", client, ec)
+	b := &cvent.EventBundle{Code: "TESTCODE01", PulledAt: time.Now().UTC().Format(time.RFC3339)}
+	b.Event = json.RawMessage(`{"id":"` + testCheckinUUID + `"}`)
+	b.Attendees = json.RawMessage(`[
+		{"id":"a1","confirmationNumber":"CONF123","contact":{"firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}},
+		{"id":"a2","confirmationNumber":"CONF456","contact":{"firstName":"Grace","lastName":"Hopper","email":"grace@example.com"}}
+	]`)
+	ec.Put(h.defaultCode, b)
+
+	rec := httptest.NewRecorder()
+	h.route(rec, httptest.NewRequest(http.MethodGet, "/api/cvent/events/TESTCODE01/attendees.csv", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/csv") {
+		t.Fatalf("Content-Type = %q", ct)
+	}
+	if cd := rec.Header().Get("Content-Disposition"); cd != `attachment; filename="TESTCODE01-attendees.csv"` {
+		t.Fatalf("Content-Disposition = %q", cd)
+	}
+	if lines := strings.Split(strings.TrimSpace(rec.Body.String()), "\n"); len(lines) != 3 {
+		t.Fatalf("got %d lines, want header + 2", len(lines))
+	}
+
+	rec = httptest.NewRecorder()
+	h.route(rec, httptest.NewRequest(http.MethodGet, "/api/cvent/events/TESTCODE01/attendees.csv?q=hopper", nil))
+	body := rec.Body.String()
+	if lines := strings.Split(strings.TrimSpace(body), "\n"); len(lines) != 2 || !strings.Contains(body, "Grace") {
+		t.Fatalf("filtered CSV = %q, want header + Grace", body)
+	}
+}

@@ -9,7 +9,8 @@
  *                     cache; on network failure the cached copy is served,
  *                     and if it is >= 5 min old an offline signal is posted
  *                     on the "cvent-data" BroadcastChannel for the page UI
- *   /api/cvent/event/attendees*   always network, never cached
+ *   /api/cvent/event/attendees*,
+ *   /api/cvent/events/<code>/attendees{,.csv}   always network, never cached
  *   /data/*  dump snapshots — cache-first, never expire (immutable)
  *   other static            stale-while-revalidate
  *   navigations             network-first, fall back to precached index.html
@@ -108,7 +109,10 @@ self.addEventListener("fetch", (event) => {
   const path = url.pathname;
 
   // (a) Attendee search: ALWAYS network — stale results are worse than none.
-  if (path.startsWith("/api/cvent/event/attendees")) {
+  // Also the per-event routes /api/cvent/events/<code>/attendees{,.csv}
+  // (a CSV export must never come from cache).
+  if (path.startsWith("/api/cvent/event/attendees") ||
+      /^\/api\/cvent\/events\/[^/]+\/attendees(\.csv)?$/.test(path)) {
     event.respondWith(fetch(req));
     return;
   }
