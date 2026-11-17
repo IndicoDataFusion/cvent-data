@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.3.0 — unreleased
+
+- CSV export of `cvent.Registrant` records: `RegistrantsTable` (one row per
+  registrant, a `Q: …` column per event question and a `Field: …` column
+  per contact custom field) and `WriteRegistrantsCSV` (UTF-8 BOM,
+  formula-like cells apostrophe-prefixed). The dump also writes
+  `<code>/registrants.csv`.
+- Server: `GET /api/cvent/events/{code}/attendees.csv?q=` downloads every
+  match; the Attendees view links it as **Export CSV**. The service worker
+  never caches the per-event attendee routes.
+- `FetchEvent` returns an event's uuid, code and title in one request.
+  `Getenv` reads a setting from the environment, else the repo-root `.env`.
+- `cmd/cvent-sheets-export`: CLI that exports registrants to CSV and Google
+  Sheets (service account, `internal/gsheets`). The release workflow
+  attaches its binaries (`make dist`) to every `v*` tag.
+
 ## v0.2.1 — 2026-10-17
 
 - `FetchDiscounts` and `DiscountsFrom`: the event's discount codes as typed
