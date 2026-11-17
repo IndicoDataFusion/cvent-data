@@ -961,3 +961,21 @@ func TestIsUUID(t *testing.T) {
 		}
 	}
 }
+
+// TestFetchEvent: one code lookup returns the event's uuid, code and title.
+func TestFetchEvent(t *testing.T) {
+	m := newCventMock(t)
+	m.setSingle("/events", []byte(`{"items":[{"id":"`+testUUID+`","code":"`+testCode+`","title":"Conf - Exhibitors"}],"paging":{"limit":200,"totalCount":1}}`))
+	c := newCventClient(m.srv.URL, "cid", "secret")
+	warmToken(c)
+	info, err := FetchEvent(context.Background(), c, testCode)
+	if err != nil {
+		t.Fatalf("FetchEvent: %v", err)
+	}
+	if info != (EventInfo{ID: testUUID, Code: testCode, Title: "Conf - Exhibitors"}) {
+		t.Fatalf("info = %+v", info)
+	}
+	if _, err := FetchEvent(context.Background(), c, testUUID); err == nil {
+		t.Fatal("unknown uuid: want an error")
+	}
+}

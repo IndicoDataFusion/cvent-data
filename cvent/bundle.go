@@ -453,3 +453,22 @@ func marshalItems(items []json.RawMessage) json.RawMessage {
 	}
 	return out
 }
+
+// EventInfo identifies an event: its uuid, short code and title.
+type EventInfo struct {
+	ID    string `json:"id"`
+	Code  string `json:"code"`
+	Title string `json:"title"`
+}
+
+// FetchEvent looks an event up by short code or uuid (one request) and
+// returns its identity, e.g. to pick events by title before fetching them.
+func FetchEvent(ctx context.Context, c *Client, code string) (EventInfo, error) {
+	raw, _, err := c.resolveEvent(ctx, code)
+	if err != nil {
+		return EventInfo{}, err
+	}
+	var info EventInfo
+	_ = json.Unmarshal(raw, &info) // resolveEvent already checked the id
+	return info, nil
+}

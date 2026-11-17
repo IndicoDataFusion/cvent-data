@@ -8,18 +8,40 @@ import (
 	"strings"
 )
 
-// WriteRegistrantsCSV writes regs as CSV, one row per registrant, for
-// opening in a spreadsheet. The fixed columns are the scalar Registrant
-// fields (the contact address split into parts; the other and billing
-// addresses on one line each), guest links and the payment summary. They
-// are followed by one "Q: <question>" column per event question and one
-// "Field: <name>" column per contact custom field, in first-seen order and
-// name order respectively, so every row has the same columns.
+// WriteRegistrantsCSV writes RegistrantsTable(regs) as CSV, for opening in
+// a spreadsheet.
 //
 // The output starts with a UTF-8 byte-order mark so Excel reads non-ASCII
 // names correctly. Text that a spreadsheet would run as a formula (leading
 // =, +, -, @, tab or CR) is prefixed with an apostrophe.
 func WriteRegistrantsCSV(w io.Writer, regs []Registrant) error {
+	header, rows := RegistrantsTable(regs)
+	if _, err := io.WriteString(w, "\xEF\xBB\xBF"); err != nil {
+		return err
+	}
+	cw := csv.NewWriter(w)
+	for _, row := range append([][]string{header}, rows...) {
+		safe := make([]string, len(row))
+		for i, cell := range row {
+			safe[i] = csvSafe(cell)
+		}
+		if err := cw.Write(safe); err != nil {
+			return err
+		}
+	}
+	cw.Flush()
+	return cw.Error()
+}
+
+// RegistrantsTable lays regs out as a table, one row per registrant, with
+// the values as-is (no CSV escaping; see WriteRegistrantsCSV). The fixed
+// columns are the scalar Registrant fields (the contact address split into
+// parts; the other and billing addresses on one line each), guest links and
+// the payment summary. They are followed by one "Q: <question>" column per
+// event question and one "Field: <name>" column per contact custom field,
+// in first-seen order and name order respectively, so every row has the
+// same columns.
+func RegistrantsTable(regs []Registrant) (header []string, rows [][]string) {
 	// Dynamic columns: event questions (keyed by id, labelled by text) and
 	// custom field names.
 	type question struct{ id, label string }
@@ -48,7 +70,7 @@ func WriteRegistrantsCSV(w io.Writer, regs []Registrant) error {
 	}
 	sort.Strings(fields)
 
-	header := append([]string(nil), registrantCSVColumns...)
+	header = append([]string(nil), registrantCSVColumns...)
 	for _, q := range questions {
 		header = append(header, "Q: "+q.label)
 	}
@@ -56,16 +78,7 @@ func WriteRegistrantsCSV(w io.Writer, regs []Registrant) error {
 		header = append(header, "Field: "+f)
 	}
 
-	if _, err := io.WriteString(w, "\xEF\xBB\xBF"); err != nil {
-		return err
-	}
-	cw := csv.NewWriter(w)
-	for i := range header {
-		header[i] = csvSafe(header[i])
-	}
-	if err := cw.Write(header); err != nil {
-		return err
-	}
+	rows = make([][]string, 0, len(regs))
 	for i := range regs {
 		r := &regs[i]
 		row := registrantCSVRow(r)
@@ -74,17 +87,14 @@ func WriteRegistrantsCSV(w io.Writer, regs []Registrant) error {
 			answers[a.QuestionID] = a.Value
 		}
 		for _, q := range questions {
-			row = append(row, csvSafe(answers[q.id]))
+			row = append(row, answers[q.id])
 		}
 		for _, f := range fields {
-			row = append(row, csvSafe(r.CustomFields[f]))
+			row = append(row, r.CustomFields[f])
 		}
-		if err := cw.Write(row); err != nil {
-			return err
-		}
+		rows = append(rows, row)
 	}
-	cw.Flush()
-	return cw.Error()
+	return header, rows
 }
 
 // registrantCSVColumns are the fixed leading columns of WriteRegistrantsCSV,
@@ -131,12 +141,8 @@ func registrantCSVRow(r *Registrant) []string {
 	for _, g := range r.Guests {
 		guests = append(guests, g.FullName)
 	}
-	text = append(text, "", r.PrimaryID, byName, byConf, strings.Join(guests, "; "))
-	for i := range text {
-		text[i] = csvSafe(text[i])
-	}
+	text = append(text, strconv.FormatBool(r.Guest), r.PrimaryID, byName, byConf, strings.Join(guests, "; "))
 	text[8] = strconv.FormatBool(r.CheckedIn)
-	text[len(text)-5] = strconv.FormatBool(r.Guest)
 
 	p := r.Payment
 	if p == nil {
@@ -160,12 +166,12 @@ func registrantCSVRow(r *Registrant) []string {
 		original = money(p.OriginalAmount)
 	}
 	return append(text,
-		csvSafe(p.Status), csvSafe(p.Currency),
+		p.Status, p.Currency,
 		money(p.Ordered), money(p.Paid), money(p.Due), money(p.Refunded), original,
-		csvSafe(p.Method), csvSafe(p.LastPaymentDate),
-		csvSafe(strings.Join(p.Invoices, "; ")),
-		csvSafe(strings.Join(discounts, "; ")),
-		csvSafe(strings.Join(items, "; ")),
+		p.Method, p.LastPaymentDate,
+		strings.Join(p.Invoices, "; "),
+		strings.Join(discounts, "; "),
+		strings.Join(items, "; "),
 	)
 }
 
