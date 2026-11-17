@@ -156,7 +156,7 @@ go run ./cmd/cvent-dump <CODE1> <CODE2>          # explicit codes
 `<dir>/index.json` plus one dir per event holding `event.json`, 13 resource
 files (attendees, orders, transactions, sessions, speakers, event questions,
 …), `registrants.json` (the `cvent.Registrant` records the Attendees view
-reads) and
+reads), `registrants.csv` (the same records as a spreadsheet) and
 `meta.json` — then exits (no server). It is one-shot and fatal on missing
 credentials. The server serves that dir at `/data/…`; the frontend reads it
 instead of the live API when the page URL has a `static=1` query param or
@@ -184,6 +184,7 @@ check-in status). The footer shows the build SHA.
 | `GET /api/cvent/events/{code}` | the 13-resource bundle plus `billingAddresses` (attendee id → address, from the transaction details); 15-min server cache |
 | `GET /api/cvent/events/{code}/payments` | attendee→order→transaction join: `totals` (ordered/paid/due/refunded) + `orders` rows + `cancelled` |
 | `GET /api/cvent/events/{code}/attendees?q=&limit=&offset=` | case-insensitive search over name/email/confirmation; `limit` defaults 50, caps at 200. `items` are `cvent.Registrant` records |
+| `GET /api/cvent/events/{code}/attendees.csv?q=` | every match (no paging) as a CSV download (`cvent.WriteRegistrantsCSV`): one row per registrant, payment summary, plus a `Q: …` column per event question and a `Field: …` column per contact custom field. The Attendees view links it as **Export CSV** |
 | `POST /api/cvent/events/{code}/repull` | background re-fetch; returns immediately (non-blocking) |
 | `GET /api/cvent/events/{code}/repull-status` | `{running, pulledAt}` |
 

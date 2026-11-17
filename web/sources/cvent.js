@@ -219,6 +219,15 @@ export async function searchAttendees(code, q, limit, offset) {
   return fetchJSON(API + "/events/" + encodeURIComponent(code) + "/attendees" + (qs ? "?" + qs : ""));
 }
 
+// CSV download URL for code's attendees (live: /api/cvent/events/<code>/
+// attendees.csv, filtered by q like the search; static: the dump's
+// registrants.csv, always every attendee). Columns: cvent.WriteRegistrantsCSV.
+export function attendeesCsvUrl(code, q) {
+  if (STATIC) return staticDataPath + encodeURIComponent(code) + "/registrants.csv";
+  const qs = q ? "?" + new URLSearchParams({ q }).toString() : "";
+  return API + "/events/" + encodeURIComponent(code) + "/attendees.csv" + qs;
+}
+
 /* ---------- repull (live mode only) ---------- */
 
 // True while a background repull is in flight (so the topbar Refresh button
@@ -1326,7 +1335,11 @@ function attendeesTableHtml(st) {
     .join("");
   const remaining = Math.max(r.total - (r.offset + r.limit), 0);
   return (
-    card('<div class="att-count-line">' + esc(r.total) + " attendees</div>") +
+    card(
+      '<div class="att-count-line"><span>' + esc(r.total) + " attendees</span>" +
+      '<a class="att-export" download href="' + esc(attendeesCsvUrl(st.code, STATIC ? "" : st.q)) + '">' +
+      (STATIC || !st.q ? "Export CSV" : "Export matches (CSV)") + "</a></div>"
+    ) +
     card(
       '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Ticket</th>' +
       "<th>Confirmation</th><th>Check-in</th></tr></thead><tbody>" +
@@ -1360,6 +1373,7 @@ export function attendees(mount, code, params) {
   closeSheet(); // route change — drop any open sheet + restore body scroll
   ensureNavWatch(); // restore body scroll on navigation-away (no unmount hook)
   const state = {
+    code,
     q: (params && params.get("q")) || "",
     items: [], result: null, loading: false,
   };
