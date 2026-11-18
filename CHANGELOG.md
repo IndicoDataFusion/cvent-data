@@ -15,6 +15,14 @@
 - `cmd/cvent-sheets-export`: CLI that exports registrants to CSV and Google
   Sheets (service account, `internal/gsheets`). The release workflow
   attaches its binaries (`make dist`) to every `v*` tag.
+- `cvent-sheets-export --info-tab <tab>` / `--info KEY=VALUE`: writes a
+  key/value info tab (and `<dir>/<tab>.csv`) with the export time, row
+  counts and the registrants added, removed and changed since the previous
+  version. `gsheets.Client.ReadTab` reads a tab's values.
+- `cvent-sheets-export --highlight`: colours added rows green and changed
+  cells yellow (previous value in a cell note) in each event tab.
+  `gsheets.Client.ReplaceTabWith` takes `ReplaceOptions` (highlights,
+  reset of earlier ones).
 
 ## v0.2.1 — 2026-10-17
 

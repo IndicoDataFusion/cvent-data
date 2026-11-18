@@ -100,6 +100,8 @@ func (f *fakeGoogle) serve(t *testing.T) func(http.ResponseWriter, *http.Request
 			w.Write([]byte(`{"replies":[{"addSheet":{"properties":{"sheetId":99}}}]}`))
 		case strings.HasSuffix(r.URL.Path, ":clear"):
 			w.Write([]byte(`{}`))
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/sheets/SID/values/"):
+			w.Write([]byte(`{"range":"x","majorDimension":"ROWS","values":[["id","name"],["1","Ada"],["2"]]}`))
 		case r.Method == http.MethodPut:
 			_ = json.Unmarshal(body, &f.put)
 			w.Write([]byte(`{}`))
@@ -166,5 +168,62 @@ func TestNewFromKeyJSONRejects(t *testing.T) {
 		if _, err := NewFromKeyJSON([]byte(in)); err == nil {
 			t.Errorf("%s: want an error", in)
 		}
+	}
+}
+
+func TestReadTab(t *testing.T) {
+	f, keyJSON := newFakeGoogle(t, "Sheet1", "Registrants")
+	c, _ := NewFromKeyJSON(keyJSON)
+	c.BaseURL = f.srv.URL + "/sheets"
+	rows, found, err := c.ReadTab(context.Background(), "SID", "Registrants")
+	if err != nil || !found {
+		t.Fatalf("ReadTab: found=%v err=%v", found, err)
+	}
+	got, _ := json.Marshal(rows)
+	if string(got) != `[["id","name"],["1","Ada"],["2"]]` {
+		t.Fatalf("rows = %s", got)
+	}
+	if last := f.calls[len(f.calls)-1]; last != "GET /sheets/SID/values/%27Registrants%27?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE" {
+		t.Fatalf("values call = %s", last)
+	}
+
+	rows, found, err = c.ReadTab(context.Background(), "SID", "missing")
+	if err != nil || found || rows != nil {
+		t.Fatalf("missing tab: rows=%v found=%v err=%v", rows, found, err)
+	}
+}
+
+func TestReplaceTabWithHighlights(t *testing.T) {
+	f, keyJSON := newFakeGoogle(t, "Registrants")
+	c, _ := NewFromKeyJSON(keyJSON)
+	c.BaseURL = f.srv.URL + "/sheets"
+	green := Color{0.85, 0.92, 0.83}
+	err := c.ReplaceTabWith(context.Background(), "SID", "Registrants", [][]string{{"id", "status"}, {"1", "x"}, {"2", "y"}},
+		ReplaceOptions{ResetHighlights: true, Highlights: []Highlight{
+			{Row: 1, Rows: 1, Color: green},
+			{Row: 2, Col: 1, Cols: 1, Color: Color{1, 0.95, 0.8}, Note: "Previous: z"},
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Requests []map[string]struct {
+			Range  map[string]any `json:"range"`
+			Cell   map[string]any `json:"cell"`
+			Fields string         `json:"fields"`
+		} `json:"requests"`
+	}
+	if err := json.Unmarshal(f.batch[len(f.batch)-1], &body); err != nil || len(body.Requests) != 4 {
+		t.Fatalf("batchUpdate = %s (%v)", f.batch[len(f.batch)-1], err)
+	}
+	reset, row, cell := body.Requests[1]["repeatCell"], body.Requests[2]["repeatCell"], body.Requests[3]["repeatCell"]
+	if reset.Fields != "userEnteredFormat.backgroundColor,note" || len(reset.Range) != 1 {
+		t.Errorf("reset = %+v", reset)
+	}
+	if row.Range["startRowIndex"] != 1.0 || row.Range["endRowIndex"] != 2.0 || row.Range["endColumnIndex"] != nil || row.Fields != "userEnteredFormat.backgroundColor" {
+		t.Errorf("row highlight = %+v", row)
+	}
+	if cell.Range["startColumnIndex"] != 1.0 || cell.Range["endColumnIndex"] != 2.0 || cell.Cell["note"] != "Previous: z" || cell.Fields != "userEnteredFormat.backgroundColor,note" {
+		t.Errorf("cell highlight = %+v", cell)
 	}
 }

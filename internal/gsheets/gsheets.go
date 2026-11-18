@@ -224,13 +224,8 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	return nil
 }
 
-// ReplaceTab makes the tab named tab in the spreadsheet hold exactly rows:
-// it adds the tab when missing, clears it, writes rows from A1 as plain
-// values (valueInputOption RAW: nothing is parsed as a formula, number or
-// date) and freezes the first row as the header.
-func (c *Client) ReplaceTab(ctx context.Context, spreadsheetID, tab string, rows [][]string) error {
-	base := "/" + url.PathEscape(spreadsheetID)
-
+// tabIDs returns the spreadsheet's tab titles mapped to their sheet ids.
+func (c *Client) tabIDs(ctx context.Context, base string) (map[string]int64, error) {
 	var meta struct {
 		Sheets []struct {
 			Properties struct {
@@ -240,15 +235,79 @@ func (c *Client) ReplaceTab(ctx context.Context, spreadsheetID, tab string, rows
 		} `json:"sheets"`
 	}
 	if err := c.do(ctx, http.MethodGet, base, url.Values{"fields": {"sheets.properties(sheetId,title)"}}, nil, &meta); err != nil {
+		return nil, err
+	}
+	ids := make(map[string]int64, len(meta.Sheets))
+	for _, s := range meta.Sheets {
+		ids[s.Properties.Title] = s.Properties.SheetID
+	}
+	return ids, nil
+}
+
+// quoteTab quotes a tab title for an A1 range.
+func quoteTab(tab string) string { return "'" + strings.ReplaceAll(tab, "'", "''") + "'" }
+
+// ReadTab returns the values of the tab named tab as formatted text, row
+// by row (the API drops trailing empty cells and rows, so rows may be
+// ragged). found is false, with no error, when the tab does not exist.
+func (c *Client) ReadTab(ctx context.Context, spreadsheetID, tab string) (rows [][]string, found bool, err error) {
+	base := "/" + url.PathEscape(spreadsheetID)
+	ids, err := c.tabIDs(ctx, base)
+	if err != nil {
+		return nil, false, err
+	}
+	if _, ok := ids[tab]; !ok {
+		return nil, false, nil
+	}
+	var res struct {
+		Values [][]string `json:"values"`
+	}
+	if err := c.do(ctx, http.MethodGet, base+"/values/"+url.PathEscape(quoteTab(tab)),
+		url.Values{"valueRenderOption": {"FORMATTED_VALUE"}, "majorDimension": {"ROWS"}}, nil, &res); err != nil {
+		return nil, true, err
+	}
+	return res.Values, true, nil
+}
+
+// Color is an RGB background colour, each channel 0–1.
+type Color struct{ Red, Green, Blue float64 }
+
+// Highlight colours a block of cells: Rows rows from Row and Cols columns
+// from Col (0-based, row 0 = the header; a Cols of 0 means to the end of
+// the row). A non-empty Note is attached to every cell of the block.
+type Highlight struct {
+	Row, Col   int
+	Rows, Cols int
+	Color      Color
+	Note       string
+}
+
+// ReplaceOptions are ReplaceTabWith's formatting extras.
+type ReplaceOptions struct {
+	// ResetHighlights clears every cell's background colour and note
+	// before Highlights are applied, so the previous run's marks go.
+	ResetHighlights bool
+	Highlights      []Highlight
+}
+
+// ReplaceTab makes the tab named tab in the spreadsheet hold exactly rows:
+// it adds the tab when missing, clears it, writes rows from A1 as plain
+// values (valueInputOption RAW: nothing is parsed as a formula, number or
+// date) and freezes the first row as the header.
+func (c *Client) ReplaceTab(ctx context.Context, spreadsheetID, tab string, rows [][]string) error {
+	return c.ReplaceTabWith(ctx, spreadsheetID, tab, rows, ReplaceOptions{})
+}
+
+// ReplaceTabWith is ReplaceTab, then applies opt in the same batchUpdate
+// as the header freeze.
+func (c *Client) ReplaceTabWith(ctx context.Context, spreadsheetID, tab string, rows [][]string, opt ReplaceOptions) error {
+	base := "/" + url.PathEscape(spreadsheetID)
+
+	ids, err := c.tabIDs(ctx, base)
+	if err != nil {
 		return err
 	}
-	sheetID, found := int64(0), false
-	for _, s := range meta.Sheets {
-		if s.Properties.Title == tab {
-			sheetID, found = s.Properties.SheetID, true
-			break
-		}
-	}
+	sheetID, found := ids[tab]
 	if !found {
 		var added struct {
 			Replies []struct {
@@ -270,7 +329,7 @@ func (c *Client) ReplaceTab(ctx context.Context, spreadsheetID, tab string, rows
 		}
 	}
 
-	quoted := "'" + strings.ReplaceAll(tab, "'", "''") + "'"
+	quoted := quoteTab(tab)
 	if err := c.do(ctx, http.MethodPost, base+"/values/"+url.PathEscape(quoted)+":clear", nil, map[string]any{}, nil); err != nil {
 		return err
 	}
@@ -283,11 +342,33 @@ func (c *Client) ReplaceTab(ctx context.Context, spreadsheetID, tab string, rows
 		map[string]any{"range": a1, "majorDimension": "ROWS", "values": rows}, nil); err != nil {
 		return err
 	}
-	freeze := map[string]any{"requests": []any{
+	requests := []any{
 		map[string]any{"updateSheetProperties": map[string]any{
 			"properties": map[string]any{"sheetId": sheetID, "gridProperties": map[string]any{"frozenRowCount": 1}},
 			"fields":     "gridProperties.frozenRowCount",
 		}},
-	}}
-	return c.do(ctx, http.MethodPost, base+":batchUpdate", nil, freeze, nil)
+	}
+	if opt.ResetHighlights {
+		requests = append(requests, map[string]any{"repeatCell": map[string]any{
+			"range":  map[string]any{"sheetId": sheetID},
+			"cell":   map[string]any{},
+			"fields": "userEnteredFormat.backgroundColor,note",
+		}})
+	}
+	for _, h := range opt.Highlights {
+		rng := map[string]any{"sheetId": sheetID, "startRowIndex": h.Row, "endRowIndex": h.Row + max(h.Rows, 1), "startColumnIndex": h.Col}
+		if h.Cols > 0 {
+			rng["endColumnIndex"] = h.Col + h.Cols
+		}
+		cell := map[string]any{"userEnteredFormat": map[string]any{"backgroundColor": map[string]any{
+			"red": h.Color.Red, "green": h.Color.Green, "blue": h.Color.Blue,
+		}}}
+		fields := "userEnteredFormat.backgroundColor"
+		if h.Note != "" {
+			cell["note"] = h.Note
+			fields += ",note"
+		}
+		requests = append(requests, map[string]any{"repeatCell": map[string]any{"range": rng, "cell": cell, "fields": fields}})
+	}
+	return c.do(ctx, http.MethodPost, base+":batchUpdate", nil, map[string]any{"requests": requests}, nil)
 }

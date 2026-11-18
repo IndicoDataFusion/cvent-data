@@ -18,11 +18,26 @@
 // (for CI secrets), each from the environment or .env. The spreadsheet must
 // be shared with the service account as Editor. Values are written as plain
 // text (no formula escaping needed).
+//
+// With --info-tab (or any --info KEY=VALUE, which implies --info-tab info),
+// a key/value summary is also written: to that tab of the sheet, and to
+// <dir>/<info-tab>.csv when CSV files are written. It holds the export time,
+// the row count per table and in total, the --info pairs, and per table the
+// registrants added, removed and changed (with the changed columns) since
+// the previous version: the tab being replaced, else the CSV file being
+// overwritten.
+//
+// With --highlight, each event tab also marks the changes since the tab's
+// previous contents: added registrant rows green, changed cells yellow with
+// the previous value as a cell note. Earlier colours and notes in the tab
+// are cleared first.
 package main
 
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -51,7 +66,13 @@ func main() {
 		sheetIDEnv = flag.String("sheet-id-env", "", "read the Google Sheet id from this variable (environment, else .env) instead of --sheet-id")
 		sheetTab   = flag.String("sheet-tab", "", "tab to replace (default: the event code); only when one event is exported")
 		sheetsKey  = flag.String("sheets-key", "", "service-account JSON key file (default: GOOGLE_SHEETS_KEY_FILE, else the key JSON in GOOGLE_SHEETS_KEY_JSON, from the environment or .env)")
+
+		infoTab = flag.String("info-tab", "", "also write a key/value summary (export time, row counts, changes since the previous version) to this tab, and to <dir>/<info-tab>.csv (\"\" = none)")
+		extra   keyValues
+
+		highlight = flag.Bool("highlight", false, "in each event's sheet tab, colour rows added since the previous version green and changed cells yellow, with the previous value as a cell note (clears the tab's earlier colours and notes)")
 	)
+	flag.Var(&extra, "info", "extra KEY=VALUE row for the info tab (repeatable; implies --info-tab info)")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "usage: %s [flags] [event-code-or-uuid ...]\n\n", os.Args[0])
 		fmt.Fprintln(flag.CommandLine.Output(), "Flags:")
@@ -73,6 +94,9 @@ func main() {
 	if *showVersion {
 		fmt.Println("cvent-sheets-export " + version)
 		return
+	}
+	if len(extra) > 0 && *infoTab == "" {
+		*infoTab = "info"
 	}
 
 	var titleRe *regexp.Regexp
@@ -133,6 +157,12 @@ func main() {
 	} else if *sheetTab != "" || *sheetsKey != "" {
 		fail("--sheet-tab and --sheets-key need --sheet-id or --sheet-id-env")
 	}
+	if *highlight && sheets == nil {
+		fail("--highlight needs --sheet-id or --sheet-id-env")
+	}
+	if *infoTab != "" && sheets == nil && *dir == "" {
+		fail("--info-tab and --info need --sheet-id, --sheet-id-env or --dir")
+	}
 
 	creds, err := cvent.FromEnvironment()
 	if err != nil {
@@ -155,8 +185,13 @@ func main() {
 
 	type table struct {
 		code, title string
-		rows        [][]string
+		rows        [][]string // header first, values as-is
+		// For the info tab with no sheet: the CSV file this export
+		// replaced (nil = none) and the new CSV, both parsed, so cells
+		// compare with the same formula escaping.
+		prevCSV, curCSV [][]string
 	}
+	exportedAt := time.Now().UTC().Format(time.RFC3339)
 	var tables []table
 	var skipped []string
 	for _, code := range events {
@@ -180,15 +215,24 @@ func main() {
 		if name == "" {
 			name = code
 		}
+		t := table{code: name, title: info.Title, rows: append([][]string{header}, rows...)}
 		if *dir != "" {
+			p := filepath.Join(*dir, name+".csv")
 			var buf bytes.Buffer
 			if err := cvent.WriteRegistrantsCSV(&buf, regs); err != nil {
 				fail(info.Code + ": " + err.Error())
 			}
+			if *infoTab != "" && sheets == nil {
+				if t.prevCSV, err = readCSV(p); err != nil {
+					fail(err.Error())
+				}
+				if t.curCSV, err = parseCSV(buf.Bytes()); err != nil {
+					fail(info.Code + ": " + err.Error())
+				}
+			}
 			if err := os.MkdirAll(*dir, 0o755); err != nil {
 				fail(err.Error())
 			}
-			p := filepath.Join(*dir, name+".csv")
 			if err := os.WriteFile(p, buf.Bytes(), 0o600); err != nil {
 				fail(err.Error())
 			}
@@ -196,28 +240,138 @@ func main() {
 		} else {
 			fmt.Printf("fetched: %s %q: %d registrants\n", info.Code, info.Title, len(regs))
 		}
-		tables = append(tables, table{name, info.Title, append([][]string{header}, rows...)})
+		tables = append(tables, t)
 	}
 	if len(tables) == 0 {
 		fail(fmt.Sprintf("no configured event title matches --match %q (checked: %s)", *match, strings.Join(skipped, ", ")))
 	}
-
-	if sheets == nil {
-		return
-	}
 	if *sheetTab != "" && len(tables) > 1 {
 		fail(fmt.Sprintf("--sheet-tab %q: %d events matched, so each needs its own tab; drop --sheet-tab to name tabs by event code", *sheetTab, len(tables)))
 	}
-	for _, t := range tables {
-		tab := *sheetTab
-		if tab == "" {
-			tab = t.code
+	tabOf := func(t table) string {
+		if *sheetTab != "" {
+			return *sheetTab
 		}
-		if err := sheets.ReplaceTab(ctx, *sheetID, tab, t.rows); err != nil {
-			fail(t.code + ": " + err.Error())
-		}
-		fmt.Printf("sheet: %s → tab %q (%d rows) of https://docs.google.com/spreadsheets/d/%s\n", t.code, tab, len(t.rows)-1, *sheetID)
+		return t.code
 	}
+	if *infoTab != "" {
+		for _, t := range tables {
+			if tabOf(t) == *infoTab || (*dir != "" && t.code == *infoTab) {
+				fail(fmt.Sprintf("--info-tab %q is also an event's tab or CSV name; pick another", *infoTab))
+			}
+		}
+	}
+
+	var infos []eventInfo
+	for _, t := range tables {
+		e := eventInfo{tab: tabOf(t), code: t.code, title: t.title, rows: len(t.rows) - 1, cur: t.rows}
+		if sheets != nil {
+			var opt gsheets.ReplaceOptions
+			if *infoTab != "" || *highlight {
+				prev, found, err := sheets.ReadTab(ctx, *sheetID, e.tab)
+				if err != nil {
+					fail(t.code + ": reading the previous tab: " + err.Error())
+				}
+				if found {
+					e.prev, e.prevSource = prev, "sheet tab"
+					if e.prev == nil {
+						e.prev = [][]string{}
+					}
+				}
+			}
+			if *highlight {
+				opt.ResetHighlights = true
+				if e.prev != nil {
+					opt.Highlights = highlights(diffTables(e.prev, t.rows))
+				}
+			}
+			if err := sheets.ReplaceTabWith(ctx, *sheetID, e.tab, t.rows, opt); err != nil {
+				fail(t.code + ": " + err.Error())
+			}
+			marked := ""
+			if *highlight {
+				marked = fmt.Sprintf(", %d highlights", len(opt.Highlights))
+			}
+			fmt.Printf("sheet: %s → tab %q (%d rows%s) of https://docs.google.com/spreadsheets/d/%s\n", t.code, e.tab, len(t.rows)-1, marked, *sheetID)
+		} else if t.prevCSV != nil {
+			e.prev, e.prevSource, e.cur = t.prevCSV, "csv file", t.curCSV
+		}
+		infos = append(infos, e)
+	}
+
+	if *infoTab == "" {
+		return
+	}
+	infoTable := infoRows(exportedAt, "cvent-sheets-export "+version, extra, infos)
+	if *highlight {
+		legend := []string{"highlights", "event tabs: added rows green, changed cells yellow (note = previous value)"}
+		infoTable = append(infoTable[:5], append([][]string{legend}, infoTable[5:]...)...)
+	}
+	if *dir != "" {
+		p := filepath.Join(*dir, *infoTab+".csv")
+		if err := writeCSV(p, infoTable); err != nil {
+			fail(err.Error())
+		}
+		fmt.Printf("info: %s\n", p)
+	}
+	if sheets != nil {
+		if err := sheets.ReplaceTab(ctx, *sheetID, *infoTab, infoTable); err != nil {
+			fail("info tab: " + err.Error())
+		}
+		fmt.Printf("info: tab %q of https://docs.google.com/spreadsheets/d/%s\n", *infoTab, *sheetID)
+	}
+}
+
+// readCSV parses a CSV file this tool wrote earlier; a missing file is nil
+// with no error.
+func readCSV(path string) ([][]string, error) {
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	rows, err := parseCSV(b)
+	if err != nil {
+		return nil, fmt.Errorf("reading the previous %s: %v", path, err)
+	}
+	return rows, nil
+}
+
+// parseCSV parses CSV bytes, dropping a leading UTF-8 BOM. An empty file
+// is an empty (non-nil) table.
+func parseCSV(b []byte) ([][]string, error) {
+	r := csv.NewReader(bytes.NewReader(bytes.TrimPrefix(b, []byte("\xEF\xBB\xBF"))))
+	r.FieldsPerRecord = -1
+	rows, err := r.ReadAll()
+	if rows == nil {
+		rows = [][]string{}
+	}
+	return rows, err
+}
+
+// writeCSV writes rows as a UTF-8 CSV with a BOM, prefixing formula-like
+// cells (e.g. "+3") with an apostrophe, as cvent.WriteRegistrantsCSV does.
+func writeCSV(path string, rows [][]string) error {
+	var buf bytes.Buffer
+	buf.WriteString("\xEF\xBB\xBF")
+	w := csv.NewWriter(&buf)
+	for _, row := range rows {
+		safe := make([]string, len(row))
+		for i, c := range row {
+			if c != "" && strings.ContainsRune("=+-@\t\r", rune(c[0])) {
+				c = "'" + c
+			}
+			safe[i] = c
+		}
+		w.Write(safe)
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return err
+	}
+	return os.WriteFile(path, buf.Bytes(), 0o600)
 }
 
 func fail(msg string) {

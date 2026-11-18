@@ -130,6 +130,21 @@ go run ./cmd/cvent-sheets-export <CODE> --dir "" \
 - `--sheet-id-env <VAR>` reads the spreadsheet id from the environment or
   `.env`.
 - Without `--sheet-tab`, each event goes to a tab named after its code.
+- `--info-tab info` also writes a two-column `key`/`value` summary: to
+  that tab, and to `<dir>/info.csv` when CSV files are written. It holds
+  `exported_at` (UTC), `exporter` (version), `tables`, `rows_total`, then
+  per event tab `<tab>.rows`, `<tab>.previous_rows`, `<tab>.rows_delta` and
+  the registrants `<tab>.added`, `<tab>.removed` and `<tab>.changed` (with
+  the changed columns) since the previous version. The previous version is
+  the tab being replaced, else the CSV file being overwritten. Rows match by
+  `id`; each list names at most 100 registrants.
+- `--info KEY=VALUE` (repeatable) adds your own rows after `rows_total`,
+  e.g. `--info source=nightly-ci`. It implies `--info-tab info`.
+- `--highlight` marks the changes in each event tab, compared with the
+  tab's previous contents: added rows light green, changed cells light
+  yellow with the previous value as a cell note. Each run first clears the
+  tab's background colours and notes, so only the latest changes show. A
+  first export (no previous tab) is not highlighted.
 - `-h` lists every flag.
 
 **Google setup (once):**
